@@ -25,15 +25,29 @@ inline std::string load_hud_page() {
         "../../engine/renderer/hud_page.html",
         "hud_page.html",
     };
+    std::string s;
     for (const char* p : candidates) {
         std::ifstream in(p);
         if (!in) continue;
         std::ostringstream ss;
         ss << in.rdbuf();
-        auto s = ss.str();
-        if (!s.empty()) return s;
+        s = ss.str();
+        if (!s.empty()) break;
     }
-    return "<!doctype html><meta charset=utf-8><title>MetaField</title><p>HUD page file not found.</p>";
+    if (s.empty())
+        s = "<!doctype html><meta charset=utf-8><title>MetaField</title><p>HUD page file not found.</p>";
+    if (s.find("move=up") == std::string::npos) {
+        s += "<script>"
+             "(function(){"
+             "const keymap={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',"
+             "w:'up',a:'left',s:'down',d:'right',W:'up',A:'left',S:'down',D:'right'};"
+             "addEventListener('keydown',function(e){"
+             "const m=keymap[e.key]; if(!m)return; e.preventDefault();"
+             "fetch('/mode?move='+m,{cache:'no-store'});"
+             "});"
+             "})();</script>";
+    }
+    return s;
 }
 
 class HudServer {
