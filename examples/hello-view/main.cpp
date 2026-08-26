@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
         else if (a == "--seconds" && i + 1 < argc) seconds = std::atoi(argv[++i]);
         else if (a == "--port" && i + 1 < argc) port = std::atoi(argv[++i]);
         else if (a == "--help" || a == "-h") {
-            std::cout << "hello_view \n  --file PATH\n  --synth\n  --port N\n  --seconds N\n";
+            std::cout << "hello_view\n  --file PATH\n  --synth\n  --port N\n  --seconds N\n";
             return 0;
         }
     }
@@ -103,11 +103,22 @@ int main(int argc, char** argv) {
         return os.str();
     });
 
-    std::cout << "MetaField Engine  \xC2\xB7  visual HUD\n";
-    std::cout << "  jsonl : " << path << (tail.file_exists() ? "  [present]\n" : "  [missing]\n");
-    std::cout << "  mode  : " << (live ? "LIVE follow" : "synthetic (switches if jsonl appears)") << "\n";
-    std::cout << "  view  : http://127.0.0.1:" << port << (hud_ok ? "\n" : "  [bind failed]\n");
-    std::cout << "  stop  : Ctrl+C\n\n";
+    const std::string url = "http://127.0.0.1:" + std::to_string(port);
+
+    std::cout << "\n";
+    std::cout << "================================================\n";
+    std::cout << " MetaField Engine HUD\n";
+    if (hud_ok) {
+        std::cout << " " << url << "\n";
+    } else {
+        std::cout << " HUD bind failed on " << url << "\n";
+    }
+    std::cout << "================================================\n";
+    std::cout << " jsonl : " << path << (tail.file_exists() ? "  [present]\n" : "  [missing]\n");
+    std::cout << " mode  : " << (live ? "LIVE follow" : "synthetic") << "\n";
+    std::cout << " stop  : Ctrl+C\n";
+    std::cout << "\n";
+    std::cout.flush();
 
     using clock = std::chrono::steady_clock;
     const auto start = clock::now();
@@ -142,5 +153,6 @@ int main(int argc, char** argv) {
     }
     hud.stop();
     std::cout << "[ok] packets=" << csi_field.packet_count() << "\n";
+    std::cout << url << "\n";
     return hud_ok ? 0 : 1;
 }

@@ -13,9 +13,8 @@ fi
 
 mkdir -p build
 cd build
-if [[ ! -f CMakeCache.txt ]]; then
-  cmake ..
-fi
+# Always reconfigure so new targets (hello_view) appear in stale build trees.
+cmake ..
 cmake --build . --target hello_world hello_csi hello_view -j"$(nproc)"
 
 echo
@@ -23,12 +22,15 @@ echo "=== hello_world ==="
 ./hello_world
 echo
 echo "=== visual HUD ==="
-echo "Opening http://127.0.0.1:8765"
+PORT=8765
+URL="http://127.0.0.1:${PORT}"
+echo
+echo "  HUD  ${URL}"
+echo
 echo "If /tmp/metafield/csi.jsonl exists it is followed; otherwise synthetic."
 echo "Ctrl+C stops the view."
 echo
 
-PORT=8765
 ./hello_view --port "$PORT" &
 VIEW_PID=$!
 cleanup() { kill "$VIEW_PID" 2>/dev/null || true; }
@@ -36,11 +38,9 @@ trap cleanup EXIT INT TERM
 
 sleep 0.4
 if command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "http://127.0.0.1:${PORT}" >/dev/null 2>&1 || true
+  xdg-open "$URL" >/dev/null 2>&1 || true
 elif command -v firefox >/dev/null 2>&1; then
-  firefox "http://127.0.0.1:${PORT}" >/dev/null 2>&1 || true
-else
-  echo "Open this in a browser: http://127.0.0.1:${PORT}"
+  firefox "$URL" >/dev/null 2>&1 || true
 fi
 
 wait "$VIEW_PID"
