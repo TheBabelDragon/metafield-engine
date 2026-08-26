@@ -1,20 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
 project(metafield-engine VERSION 0.1.0 LANGUAGES CXX)
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
-
 if(MSVC)
   add_compile_options(/W4 /permissive-)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
-
 add_library(metafield_core
   engine/core/types.cpp
   engine/ecs/entity.cpp
@@ -25,34 +21,26 @@ add_library(metafield_core
   engine/fields/csi_field.cpp
   engine/ingest/csi_parse.cpp
 )
-
-target_include_directories(metafield_core
-  PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
+target_include_directories(metafield_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(hello_world examples/hello-world/main.cpp)
 target_link_libraries(hello_world PRIVATE metafield_core)
-
 add_executable(hello_csi examples/hello-csi/main.cpp)
 target_link_libraries(hello_csi PRIVATE metafield_core)
-
 add_executable(hello_field examples/hello-field/main.cpp)
 target_link_libraries(hello_field PRIVATE metafield_core)
-
 add_executable(hello_view examples/hello-view/main.cpp)
 target_link_libraries(hello_view PRIVATE metafield_core)
 find_package(Threads REQUIRED)
 target_link_libraries(hello_view PRIVATE Threads::Threads)
-
 add_custom_command(TARGET hello_view POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     ${CMAKE_SOURCE_DIR}/engine/renderer/hud_page.html
-    $<TARGET_FILE_DIR:hello_view>/hud_page.html
-)
-
+    $<TARGET_FILE_DIR:hello_view>/hud_page.html)
+add_executable(substrate_invariants tests/substrate_invariants.cpp)
+target_link_libraries(substrate_invariants PRIVATE metafield_core)
 enable_testing()
 add_test(NAME hello_world COMMAND hello_world)
 add_test(NAME hello_field COMMAND hello_field)
+add_test(NAME substrate_invariants COMMAND substrate_invariants)
 add_test(NAME hello_csi_synth COMMAND hello_csi --synth --seconds 2)
 add_test(NAME hello_view_synth COMMAND hello_view --synth --seconds 2)
