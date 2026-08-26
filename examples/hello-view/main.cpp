@@ -1,5 +1,7 @@
-// hello-view — CSI ingest + localhost 3D HUD
+// hello-view — World-owned scene + CSI ingest + localhost 3D HUD
 #include "engine/world/world.hpp"
+#include "engine/world/demo_universe.hpp"
+#include "engine/ecs/components.hpp"
 #include "engine/fields/csi_field.hpp"
 #include "engine/ingest/csi_parse.hpp"
 #include "engine/ingest/jsonl_tail.hpp"
@@ -7,15 +9,17 @@
 #include "engine/renderer/hud_server.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <iomanip>
 
 using namespace mf;
-
 static volatile std::sig_atomic_t g_run = 1;
 static void on_sig(int) { g_run = 0; }
 
@@ -24,101 +28,86 @@ static const char* default_jsonl() {
     if (env && env[0]) return env;
     return "/tmp/metafield/csi.jsonl";
 }
-
 static std::string json_escape(const std::string& s) {
-    std::string o;
-    o.reserve(s.size());
-    for (char c : s) {
-        if (c == '"' || c == '\\') { o.push_back('\\'); o.push_back(c); }
-        else o.push_back(c);
-    }
+    std::string o; o.reserve(s.size());
+    for (char c : s) { if (c=='"'||c=='\\') { o.push_back('\\'); o.push_back(c);} else o.push_back(c); }
     return o;
 }
-
 static std::string csi_array(const std::vector<float>& v) {
+    std::ostringstream os; os << '[';
+    for (size_t i=0;i<v.size();++i){ if(i) os<<','; os<<v[i]; }
+    os << ']'; return os.str();
+}
+static std::string hex_color(std::uint32_t c) {
     std::ostringstream os;
-    os << '[';
-    for (size_t i = 0; i < v.size(); ++i) {
-        if (i) os << ',';
-        os << v[i];
-    }
-    os << ']';
+    os << '#' << std::hex << std::setw(6) << std::setfill('0') << (c & 0xffffff);
     return os.str();
 }
 
 int main(int argc, char** argv) {
-    std::signal(SIGINT, on_sig);
-    std::signal(SIGTERM, on_sig);
-
-    std::string path = default_jsonl();
-    bool force_synth = false;
-    int seconds = 0;
-    int port = 8765;
-
-    for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        if (a == "--synth") force_synth = true;
-        else if (a == "--file" && i + 1 < argc) path = argv[++i];
-        else if (a == "--seconds" && i + 1 < argc) seconds = std::atoi(argv[++i]);
-        else if (a == "--port" && i + 1 < argc) port = std::atoi(argv[++i]);
-        else if (a == "--help" || a == "-h") {
-            std::cout << "hello_view\n  --file PATH\n  --synth\n  --port N\n  --seconds N\n";
-            return 0;
-        }
+    std::signal(SIGINT, on_sig); std::signal(SIGTERM, on_sig);
+    std::string path = default_jsonl(); bool force_synth=false; int seconds=0; int port=8765;
+    for (int i=1;i<argc;++i){
+        std::string a=argv[i];
+        if(a=="--synth") force_synth=true;
+        else if(a=="--file"&&i+1<argc) path=argv[++i];
+        else if(a=="--seconds"&&i+1<argc) seconds=std::atoi(argv[++i]);
+        else if(a=="--port"&&i+1<argc) port=std::atoi(argv[++i]);
+        else if(a=="--help"||a=="-h"){ std::cout<<"hello_view\n"; return 0; }
     }
 
     World world;
-    auto& csi_field = world.fields().create<CsiField>(10);
+    auto& csi_field = seed_demo_universe(world);
     JsonlTail tail(path, true);
     bool live = !force_synth && tail.file_exists();
+    std::unordered_map<std::string, EntityID> sensors;
 
     HudServer hud;
     const bool hud_ok = hud.start(port, [&]() {
         auto latest = csi_field.latest();
-        auto bodies = csi_field.bodies();
         std::ostringstream os;
         os << "{\"packets\":" << csi_field.packet_count()
            << ",\"sim_t\":" << world.time().simulation_time
-           << ",\"live\":" << (live ? "true" : "false")
-           << ",\"jsonl_missing\":" << (tail.file_exists() ? "false" : "true")
+           << ",\"live\":" << (live?"true":"false")
+           << ",\"jsonl_missing\":" << (tail.file_exists()?"false":"true")
+           << ",\"entities\":" << world.entities().living_count()
            << ",\"latest\":{"
            << "\"body_id\":\"" << json_escape(latest.body_id) << "\","
-           << "\"synthetic\":" << (latest.synthetic ? "true" : "false") << ","
+           << "\"synthetic\":" << (latest.synthetic?"true":"false") << ","
            << "\"rssi\":" << latest.region("rssi") << ","
            << "\"energy\":" << latest.region("csi_energy") << ","
            << "\"spread\":" << latest.region("csi_spread") << ","
            << "\"csi\":" << csi_array(latest.csi)
-           << "},\"bodies\":[";
-        bool first = true;
-        for (const auto& [id, st] : bodies) {
-            if (!first) os << ',';
-            first = false;
-            os << "{\"id\":\"" << json_escape(id)
-               << "\",\"packets\":" << st.packet_count
-               << ",\"synthetic\":" << (st.last.synthetic ? "true" : "false")
-               << ",\"rssi\":" << st.last.region("rssi")
-               << ",\"energy\":" << st.last.region("csi_energy")
-               << ",\"spread\":" << st.last.region("csi_spread")
-               << "}";
-        }
+           << "},\"world\":[";
+        bool first=true;
+        world.entities().each<Name, Transform, Renderable>([&](EntityID id, Name& name, Transform& tr, Renderable& rend){
+            if(!first) os<<','; first=false;
+            os << "{\"id\":" << id
+               << ",\"name\":\"" << json_escape(name.value) << "\""
+               << ",\"kind\":\"" << json_escape(rend.kind) << "\""
+               << ",\"x\":" << tr.position.x
+               << ",\"y\":" << tr.position.y
+               << ",\"z\":" << tr.position.z
+               << ",\"sx\":" << rend.sx
+               << ",\"sy\":" << rend.sy
+               << ",\"sz\":" << rend.sz
+               << ",\"color\":\"" << hex_color(rend.color) << "\"}";
+        });
         os << "]}";
         return os.str();
     });
 
     const std::string url = "http://127.0.0.1:" + std::to_string(port);
-
     std::cout << "\n================================================\n";
-    std::cout << " MetaField Engine HUD\n";
-    std::cout << " " << url << (hud_ok ? "\n" : "  [bind failed]\n");
+    std::cout << " MetaField Engine HUD\n " << url << (hud_ok?"\n":"  [bind failed]\n");
     std::cout << "================================================\n";
-    std::cout << " jsonl : " << path << (tail.file_exists() ? "  [present]\n" : "  [missing]\n");
+    std::cout << " jsonl : " << path << (tail.file_exists()?"  [present]\n":"  [missing]\n");
     if (!tail.file_exists()) {
         std::cout << " hint  : JSONL missing is normal until the CSI snake writes it.\n";
-        std::cout << "         HUD still runs on a synthetic field.\n";
-        std::cout << "         LIVE path:\n";
         std::cout << "           python -m observer.metafield_bridge --udp --out /tmp/metafield/csi.jsonl\n";
     }
-    std::cout << " mode  : " << (live ? "LIVE follow" : "synthetic") << "\n";
+    std::cout << " mode  : " << (live?"LIVE follow":"synthetic") << "\n";
+    std::cout << " world : " << world.entities().living_count() << " entities\n";
     std::cout << " stop  : Ctrl+C\n\n";
     std::cout.flush();
 
@@ -129,7 +118,7 @@ int main(int argc, char** argv) {
 
     while (g_run) {
         if (seconds > 0) {
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(clock::now() - start).count();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(clock::now()-start).count();
             if (elapsed >= seconds) break;
         }
         if (!force_synth && !live && tail.file_exists()) {
@@ -137,23 +126,47 @@ int main(int argc, char** argv) {
             std::cout << "[ingest] live JSONL appeared — " << url << "\n";
         }
         if (live) {
-            for (int n = 0; n < 64; ++n) {
+            for (int n=0;n<64;++n) {
                 auto line = tail.poll();
                 if (!line) break;
                 auto obs = parse_csi_line(*line);
-                if (obs.valid) csi_field.ingest(obs);
+                if (!obs.valid) continue;
+                csi_field.ingest(obs);
+                if (!sensors.count(obs.body_id)) {
+                    EntityID id = world.spawn();
+                    world.entities().add<Name>(id, Name{obs.body_id});
+                    world.entities().add<Transform>(id, Transform{});
+                    world.entities().add<Renderable>(id, Renderable{"sensor",0.35f,0.6f,0.35f, obs.synthetic?0xc9842au:0x2ee6a6u});
+                    world.entities().add<SensorTag>(id, SensorTag{obs.body_id});
+                    sensors[obs.body_id] = id;
+                }
             }
         } else {
             auto now = clock::now();
             if (now >= next_synth) {
-                csi_field.ingest(make_synthetic_csi(synth_tick++));
+                auto obs = make_synthetic_csi(synth_tick++);
+                csi_field.ingest(obs);
+                if (!sensors.count(obs.body_id)) {
+                    EntityID id = world.spawn();
+                    world.entities().add<Name>(id, Name{obs.body_id});
+                    world.entities().add<Transform>(id, Transform{Vec3{0.f,0.f,-0.2f}});
+                    world.entities().add<Renderable>(id, Renderable{"sensor",0.35f,0.6f,0.35f,0xc9842au});
+                    world.entities().add<SensorTag>(id, SensorTag{obs.body_id});
+                    sensors[obs.body_id] = id;
+                }
                 next_synth = now + std::chrono::milliseconds(125);
             }
         }
-        world.tick(1.0 / 60.0);
+        const float t = static_cast<float>(world.time().simulation_time);
+        world.entities().each<Name, Transform, Renderable>([&](EntityID, Name& name, Transform& tr, Renderable& rend){
+            if (name.value=="player") { tr.position.x = std::sin(t*0.35f)*1.6f; tr.position.z = 2.2f + std::cos(t*0.35f)*0.4f; }
+            else if (name.value=="npc") { tr.position.x = 1.4f + std::sin(t*0.55f)*0.6f; }
+            else if (rend.kind=="sensor") { rend.sy = 0.4f + csi_field.latest().region("csi_energy")*1.6f; }
+        });
+        world.tick(1.0/60.0);
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     hud.stop();
-    std::cout << "[ok] packets=" << csi_field.packet_count() << "\n" << url << "\n";
-    return hud_ok ? 0 : 1;
+    std::cout << "[ok] packets=" << csi_field.packet_count() << " entities=" << world.entities().living_count() << "\n" << url << "\n";
+    return hud_ok?0:1;
 }
