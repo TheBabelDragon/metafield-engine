@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MetaField Engine</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin:0; height:100%; background:#07090d; color:#d7e0ea;
+    font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; }
+  #wrap { display:grid; grid-template-rows: auto 1fr auto; height:100%; }
+  header { display:flex; align-items:center; gap:16px; padding:12px 18px;
+    border-bottom:1px solid #1b2430; background:#0c1016; }
+  h1 { font-size:15px; letter-spacing:.16em; margin:0; font-weight:650; }
+  .badge { padding:3px 8px; border-radius:999px; font-weight:700; font-size:11px; letter-spacing:.08em; }
+  .live { background:#12351f; color:#5dffa3; }
+  .syn  { background:#3a2a10; color:#ffc46b; }
+  .wait { background:#222; color:#889; }
+  .meta { opacity:.75; margin-left:auto; }
+  main { display:grid; grid-template-columns: 280px 1fr 260px; gap:14px; padding:14px; min-height:0; }
+  panel { background:#0e141c; border:1px solid #1c2733; border-radius:10px; padding:12px; min-height:0; }
+  h2 { margin:0 0 10px; font-size:11px; letter-spacing:.14em; color:#8aa0b5; font-weight:650; }
+  canvas { width:100%; height:auto; display:block; border-radius:6px; background:#080b10; }
+  .meter { display:grid; grid-template-columns: 64px 1fr 42px; align-items:center; gap:8px; margin:8px 0; }
+  .bar { height:10px; background:#18202a; border-radius:6px; overflow:hidden; }
+  .bar > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#2ee6a6,#7cff6b); }
+  .bodies div { padding:8px 0; border-bottom:1px solid #1a2430; }
+  footer { padding:8px 18px; color:#6d7f90; border-top:1px solid #1b2430; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+</style>
+<div id="wrap">
+  <header>
+    <h1>METAFIELD ENGINE</h1>
+    <span id="badge" class="badge wait">WAIT</span>
+    <span id="src">no packets yet</span>
+    <span class="meta" id="stats"></span>
+  </header>
+  <main>
+    <panel>
+      <h2>SUBCARRIERS</h2>
+      <canvas id="bars" width="520" height="280"></canvas>
+      <div class="meter"><span>rssi</span><div class="bar"><i id="m_rssi"></i></div><span id="t_rssi">—</span></div>
+      <div class="meter"><span>energy</span><div class="bar"><i id="m_e"></i></div><span id="t_e">—</span></div>
+      <div class="meter"><span>spread</span><div class="bar"><i id="m_s"></i></div><span id="t_s">—</span></div>
+    </panel>
+    <panel>
+      <h2>FIELD MAP</h2>
+      <canvas id="map" width="720" height="520"></canvas>
+    </panel>
+    <panel>
+      <h2>BODIES</h2>
+      <div class="bodies" id="bodies">waiting for ingest…</div>
+    </panel>
+  </main>
+  <footer>localhost HUD · does not bind :4210 · tails /tmp/metafield/csi.jsonl or synthesizes</footer>
+</div>
+<script>
+const bars = document.getElementById('bars');
+const map  = document.getElementById('map');
+const bctx = bars.getContext('2d');
+const mctx = map.getContext('2d');
+function clamp01(v){ return Math.max(0, Math.min(1, Number(v)||0)); }
+function heat(t){
+  t = clamp01(t);
+  const r = Math.floor(20 + 220*t);
+  const g = Math.floor(40 + 180*(1-Math.abs(t-0.55)*2));
+  const b = Math.floor(180*(1-t) + 40);
+  return 'rgb('+r+','+g+','+b+')';
+}
+function drawBars(csi){
+  const w = bars.width, h = bars.height;
+  bctx.fillStyle = '#080b10'; bctx.fillRect(0,0,w,h);
+  if (!csi || !csi.length) return;
+  const n = csi.length, gap = 2, bw = Math.max(2, (w-20)/n - gap);
+  for (let i=0;i<n;i++){
+    const v = clamp01(csi[i]);
+    const bh = v * (h-24);
+    bctx.fillStyle = heat(v);
+    bctx.fillRect(10 + i*(bw+gap), h-12-bh, bw, bh);
+  }
+}
+function drawMap(bodies){
+  const w = map.width, h = map.height;
+  mctx.fillStyle = '#080b10'; mctx.fillRect(0,0,w,h);
+  const cx = w/2, cy = h/2, R = Math.min(w,h)*0.38;
+  mctx.strokeStyle = '#16202b';
+  for (let i=1;i<=4;i++){ mctx.beginPath(); mctx.arc(cx,cy,R*i/4,0,Math.PI*2); mctx.stroke(); }
+  const list = bodies || [];
+  const N = Math.max(list.length, 1);
+  list.forEach((b, i) => {
+    const ang = -Math.PI/2 + (i / N) * Math.PI*2;
+    const x = cx + Math.cos(ang)*R*0.72;
+    const y = cy + Math.sin(ang)*R*0.72;
+    const e = clamp01(b.energy);
+    const rad = 18 + e*70;
+    const g = mctx.createRadialGradient(x,y,2,x,y,rad);
+    g.addColorStop(0, 'rgba(90,255,170,'+(0.15+e*0.55)+')');
+    g.addColorStop(1, 'rgba(90,255,170,0)');
+    mctx.fillStyle = g; mctx.beginPath(); mctx.arc(x,y,rad,0,Math.PI*2); mctx.fill();
+    mctx.fillStyle = b.synthetic ? '#ffc46b' : '#5dffa3';
+    mctx.beginPath(); mctx.arc(x,y,5,0,Math.PI*2); mctx.fill();
+    mctx.fillStyle = '#cfe3f3';
+    mctx.font = '12px ui-sans-serif';
+    mctx.fillText(b.id || 'body', x+8, y-6);
+  });
+}
+function setMeter(id, tId, v){
+  v = clamp01(v);
+  document.getElementById(id).style.width = (v*100).toFixed(1)+'%';
+  document.getElementById(tId).textContent = v.toFixed(2);
+}
+async function tick(){
+  try {
+    const r = await fetch('/state', {cache:'no-store'});
+    const s = await r.json();
+    const latest = s.latest || {};
+    const badge = document.getElementById('badge');
+    if (!s.packets) { badge.className = 'badge wait'; badge.textContent = 'WAIT'; }
+    else if (latest.synthetic) { badge.className = 'badge syn'; badge.textContent = 'SYN'; }
+    else { badge.className = 'badge live'; badge.textContent = 'LIVE'; }
+    document.getElementById('src').textContent = latest.body_id || '—';
+    document.getElementById('stats').textContent =
+      'packets '+(s.packets||0)+'   bodies '+(s.bodies?s.bodies.length:0)+'   t '+Number(s.sim_t||0).toFixed(2)+'s';
+    drawBars(latest.csi);
+    setMeter('m_rssi','t_rssi', latest.rssi);
+    setMeter('m_e','t_e', latest.energy);
+    setMeter('m_s','t_s', latest.spread);
+    const box = document.getElementById('bodies');
+    if (!s.bodies || !s.bodies.length) box.textContent = 'waiting for ingest…';
+    else box.innerHTML = s.bodies.map(b =>
+      '<div><b>'+b.id+'</b> n='+b.packets+'  E='+Number(b.energy).toFixed(2)+'  rssi='+Number(b.rssi).toFixed(2)+'</div>'
+    ).join('');
+    drawMap(s.bodies);
+  } catch (e) {}
+}
+setInterval(tick, 50);
+tick();
+</script>
+</html>
