@@ -5,21 +5,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Default to RelWithDebInfo if the user didn't specify a build type
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
-# Warnings
 if(MSVC)
   add_compile_options(/W4 /permissive-)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic)
-  # -Wconversion is useful later; keep off for the initial scaffold so the
-  # first build stays quiet on Arch/GCC.
 endif()
 
-# Core library (header-heavy; .cpp files exist mainly for linkage)
 add_library(metafield_core
   engine/core/types.cpp
   engine/ecs/entity.cpp
@@ -27,6 +22,8 @@ add_library(metafield_core
   engine/world/world.cpp
   engine/world/time.cpp
   engine/fields/field.cpp
+  engine/fields/csi_field.cpp
+  engine/ingest/csi_parse.cpp
 )
 
 target_include_directories(metafield_core
@@ -34,9 +31,12 @@ target_include_directories(metafield_core
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# Minimal smoke-test executable — no external dependencies
 add_executable(hello_world examples/hello-world/main.cpp)
 target_link_libraries(hello_world PRIVATE metafield_core)
 
+add_executable(hello_csi examples/hello-csi/main.cpp)
+target_link_libraries(hello_csi PRIVATE metafield_core)
+
 enable_testing()
 add_test(NAME hello_world COMMAND hello_world)
+add_test(NAME hello_csi_synth COMMAND hello_csi --synth --seconds 2)
