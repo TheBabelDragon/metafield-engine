@@ -42,6 +42,12 @@ target_link_libraries(hello_view PRIVATE metafield_core)
 find_package(Threads REQUIRED)
 target_link_libraries(hello_view PRIVATE Threads::Threads)
 
+add_custom_command(TARGET hello_view POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${CMAKE_SOURCE_DIR}/engine/renderer/hud_page.html
+    $<TARGET_FILE_DIR:hello_view>/hud_page.html
+)
+
 enable_testing()
 add_test(NAME hello_world COMMAND hello_world)
 add_test(NAME hello_csi_synth COMMAND hello_csi --synth --seconds 2)

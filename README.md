@@ -1,12 +1,8 @@
 # MetaField Engine
 
-**Unreal-style cross-domain universe engine.**
+Cross-domain universe engine. World state first. Existing optical / echo / CSI / Aurora work plugs in later.
 
-Canonical World state · ECS · Fields · CSI ingest · live visual HUD.
-
----
-
-## Hands-free on Arch Linux
+## Arch Linux
 
 ```bash
 cd metafield-engine
@@ -14,7 +10,7 @@ git pull
 bash scripts/run-arch.sh
 ```
 
-If you already have a `build/` folder from before `hello_view` existed:
+Stale build folder (the old `No rule to make hello_view` error):
 
 ```bash
 cd metafield-engine/build
@@ -23,15 +19,29 @@ cmake --build . --target hello_view
 ./hello_view
 ```
 
-The process prints the HUD address:
+The process prints:
 
 ```
 http://127.0.0.1:8765
 ```
 
-That is HTTP on localhost (not HTTPS). Open it in a browser. Ctrl+C stops the view.
+That is HTTP on localhost. Open it. Ctrl+C stops.
 
-No extra libraries. No UDP :4210 bind.
+`jsonl [missing]` is normal until throne-room writes `/tmp/metafield/csi.jsonl`. The World still runs on a synthetic field.
 
-If `/tmp/metafield/csi.jsonl` exists, the HUD is live CSI.
-If not, it synthesizes an 8 Hz field so the picture still moves.
+LIVE (optional other terminal):
+
+```bash
+mkdir -p /tmp/metafield
+python -m observer.metafield_bridge --udp --out /tmp/metafield/csi.jsonl
+```
+
+## What v0 includes
+
+- World + ECS + Time + Fields
+- First universe: house, tree, light, player, NPC
+- CSI ingest (live JSONL or synthetic)
+- 3D HUD of World-owned entities
+- Player / NPC locomotion
+
+Not yet: Vulkan renderer, optical-body / echo-grid adapters, Aurora fabric.
