@@ -1,4 +1,6 @@
 #include "engine/substrate/scheduler.hpp"
+#include "engine/substrate/replay.hpp"
+#include "engine/substrate/tick_json.hpp"
 #include <iostream>
 #include <iomanip>
 using namespace mf;
@@ -8,9 +10,12 @@ int main() {
     field.write({3,0,3}, Channel::Temperature, 1.0f);
     field.write({4,0,3}, Channel::Temperature, 0.8f);
     field.write({3,0,3}, Channel::Information, 0.74f);
+    const auto snap0 = capture(field);
+    FieldTickStream stream;
     FieldScheduler sched;
     sched.add(std::make_unique<DiffusionSystem>(0.8f, Boundary::Closed));
     sched.add(std::make_unique<InformationDecaySystem>(0.15f));
+    sched.attach(stream);
     std::cout << "MetaField substrate\n systems=" << sched.system_count() << "\n";
     for (int i=0;i<8;++i) {
         auto tick = sched.step(field, 0.16f);
@@ -20,12 +25,8 @@ int main() {
                   << "  heat=" << std::fixed << std::setprecision(3) << field.sum(Channel::Temperature)
                   << "  info=" << field.sum(Channel::Information) << "\n";
     }
-    if (const auto* d = sched.last().deltas.find({3,0,3}, Channel::Temperature))
-        std::cout << " CELL (3,0,3) temperature " << d->old_value << " -> " << d->new_value
-                  << "  system=" << system_name(d->system_id) << "  tick=" << d->tick << "\n";
-    if (const auto* d = sched.last().deltas.find({3,0,3}, Channel::Information))
-        std::cout << " CELL (3,0,3) information " << d->old_value << " -> " << d->new_value
-                  << "  system=" << system_name(d->system_id) << "  tick=" << d->tick << "\n";
-    std::cout << "[OK] FieldTick commit\n";
+    std::cout << " replay match=" << (fields_equivalent(field, replay(snap0, stream.ticks())) ? "yes" : "NO") << "\n";
+    std::cout << " last tick json:\n" << tick_to_json(sched.last()) << "\n";
+    std::cout << "[OK] FieldTick stream + replay\n";
     return 0;
 }

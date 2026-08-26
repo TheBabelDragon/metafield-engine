@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/substrate/system.hpp"
+#include "engine/substrate/tick_stream.hpp"
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -7,6 +8,7 @@ namespace mf {
 class FieldScheduler {
 public:
     void add(std::unique_ptr<FieldSystem> sys) { systems_.push_back(std::move(sys)); }
+    void attach(FieldTickStream& stream) { stream_ = &stream; }
     FieldTick step(VoxelField& field, float dt) {
         FieldView view(field);
         FieldDeltaList all;
@@ -32,6 +34,7 @@ public:
         tick.dt = dt;
         tick.deltas = std::move(committed);
         last_ = tick;
+        if (stream_) stream_->publish(tick);
         return tick;
     }
     const FieldTick& last() const { return last_; }
@@ -39,6 +42,7 @@ public:
     std::size_t system_count() const { return systems_.size(); }
 private:
     std::vector<std::unique_ptr<FieldSystem>> systems_;
+    FieldTickStream* stream_ = nullptr;
     std::uint64_t sequence_ = 0;
     double time_ = 0.0;
     FieldTick last_{};

@@ -12,15 +12,9 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 add_library(metafield_core
-  engine/core/types.cpp
-  engine/ecs/entity.cpp
-  engine/ecs/registry.cpp
-  engine/world/world.cpp
-  engine/world/time.cpp
-  engine/fields/field.cpp
-  engine/fields/csi_field.cpp
-  engine/ingest/csi_parse.cpp
-)
+  engine/core/types.cpp engine/ecs/entity.cpp engine/ecs/registry.cpp
+  engine/world/world.cpp engine/world/time.cpp engine/fields/field.cpp
+  engine/fields/csi_field.cpp engine/ingest/csi_parse.cpp)
 target_include_directories(metafield_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(hello_world examples/hello-world/main.cpp)
 target_link_libraries(hello_world PRIVATE metafield_core)
@@ -38,9 +32,12 @@ add_custom_command(TARGET hello_view POST_BUILD
     $<TARGET_FILE_DIR:hello_view>/hud_page.html)
 add_executable(substrate_invariants tests/substrate_invariants.cpp)
 target_link_libraries(substrate_invariants PRIVATE metafield_core)
+add_executable(tick_replay tests/tick_replay.cpp)
+target_link_libraries(tick_replay PRIVATE metafield_core)
 enable_testing()
 add_test(NAME hello_world COMMAND hello_world)
 add_test(NAME hello_field COMMAND hello_field)
 add_test(NAME substrate_invariants COMMAND substrate_invariants)
+add_test(NAME tick_replay COMMAND tick_replay)
 add_test(NAME hello_csi_synth COMMAND hello_csi --synth --seconds 2)
 add_test(NAME hello_view_synth COMMAND hello_view --synth --seconds 2)
