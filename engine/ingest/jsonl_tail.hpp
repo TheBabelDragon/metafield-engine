@@ -4,7 +4,6 @@
 #include <string>
 #include <optional>
 #include <cstdint>
-#include <algorithm>
 #include <sys/stat.h>
 
 namespace mf {
@@ -21,21 +20,33 @@ public:
         return ::stat(path_.c_str(), &st) == 0 && S_ISREG(st.st_mode);
     }
 
+    std::int64_t bytes() const { return file_size(); }
+
     std::optional<std::string> poll() {
         if (!stream_.is_open()) {
-            stream_.open(path_);
+            stream_.open(path_, std::ios::in);
             if (!stream_.is_open()) return std::nullopt;
             const auto sz = file_size();
-            if (follow_ && sz > lookback_) {
+            if (lookback_ <= 0) {
+                stream_.seekg(0, std::ios::end);
+                pos_ = sz;
+            } else if (follow_ && sz > lookback_) {
                 stream_.seekg(sz - lookback_, std::ios::beg);
                 std::string discard;
                 std::getline(stream_, discard);
+                auto g = stream_.tellg();
+                pos_ = g >= 0 ? static_cast<std::int64_t>(g) : sz;
+            } else {
+                pos_ = 0;
             }
             last_size_ = sz;
         }
 
         std::string line;
         if (std::getline(stream_, line)) {
+            auto g = stream_.tellg();
+            if (g >= 0) pos_ = static_cast<std::int64_t>(g);
+            if (!line.empty() && line.back() == '\r') line.pop_back();
             return line;
         }
 
@@ -43,9 +54,14 @@ public:
         const auto sz = file_size();
         if (sz < last_size_) {
             stream_.close();
-            stream_.open(path_);
+            pos_ = 0;
             last_size_ = sz;
             return std::nullopt;
+        }
+        if (sz > pos_) stream_.seekg(pos_, std::ios::beg);
+        else {
+            stream_.seekg(0, std::ios::end);
+            pos_ = sz;
         }
         last_size_ = sz;
         return std::nullopt;
@@ -63,6 +79,7 @@ private:
     std::int64_t lookback_ = 65536;
     std::ifstream stream_;
     std::int64_t last_size_ = 0;
+    std::int64_t pos_ = 0;
 };
 
 } // namespace mf
