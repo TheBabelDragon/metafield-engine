@@ -49,20 +49,24 @@ metafield-engine/
 
 ---
 
-## First Milestone (this commit)
+## Build & Run on Arch Linux
 
-- [x] `World` — single source of truth
-- [x] `Entity` + sparse component storage (ECS foundation)
-- [x] `Field` interface + sample API
-- [x] `TimeState` (simulation / real / network / replay)
-- [ ] Spawn cube → move cube → render cube
-- [ ] 10k entities
-- [ ] Sample a field and visualise it
-- [ ] One real ESP32 sensor → world state
+### 1. System packages
 
----
+```bash
+sudo pacman -S --needed base-devel cmake git
+```
 
-## Building
+That is all. No extra libraries are required for the current core + hello-world.
+
+### 2. Clone
+
+```bash
+git clone https://github.com/TheBabelDragon/metafield-engine.git
+cd metafield-engine
+```
+
+### 3. Configure + build
 
 ```bash
 mkdir build && cd build
@@ -70,11 +74,71 @@ cmake ..
 cmake --build .
 ```
 
-Requires C++20.
+Expected output ends with:
+
+```
+[100%] Built target hello_world
+```
+
+### 4. Run the smoke test
+
+```bash
+./hello_world
+```
+
+You should see something like:
+
+```
+Fields registered: 3
+Living entities: 3
+Optical intensity at player:  1
+Thermal value at player:      24 °C
+Acoustic intensity at player: 0.05
+Simulation time: 0.0833333 s
+Tick count:      5
+Entities with Transform:
+  Entity … @ (…)
+  …
+
+[OK] MetaField Engine core smoke test passed.
+```
+
+(Entity print order is currently unordered-map order — that is expected.)
+
+### 5. Optional: run via CTest
+
+```bash
+ctest --output-on-failure
+```
 
 ---
 
-## Status
+## Current Status
 
-Architecture scaffold. No renderer, no hardware drivers, no networking yet.
-The next concrete step is a minimal runtime that can spawn entities, tick the world, and sample fields.
+| Piece                    | State                          |
+|--------------------------|--------------------------------|
+| World + TimeState        | Working                        |
+| ECS (EntityRegistry)     | Working (simple sparse pools)  |
+| Field interface + stubs  | Working (analytic samples)     |
+| hello-world example      | Builds & runs                  |
+| Renderer                 | Not started                    |
+| Hardware abstraction     | Not started                    |
+| Plugins (optical/echo)   | Placeholders only              |
+| Aurora Fabric            | Not started                    |
+
+The architecture is now fixed so the next layers (renderer → hardware → plugins) can be added without rewriting the core.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full plan.
+
+---
+
+## Next milestones
+
+1. Minimal renderer (SDL + Vulkan or OpenGL + ImGui) — spawn cube → move cube → render cube
+2. HardwareDevice interface
+3. `plugins/optical-body` adapter around the existing optical-body-s3 repo
+4. One real ESP32 sensor feeding a FieldSample into the World
+
+---
+
+*Part of the MetaField physical-field substrate work.*

@@ -3,7 +3,6 @@
 #include "engine/core/types.hpp"
 #include <memory>
 #include <string>
-#include <vector>
 #include <unordered_map>
 
 namespace mf {
@@ -14,13 +13,13 @@ namespace mf {
 // ---------------------------------------------------------------------------
 
 enum class FieldType : uint32_t {
-    Optical        = 1,
-    Thermal        = 2,
-    Acoustic       = 3,
+    Optical         = 1,
+    Thermal         = 2,
+    Acoustic        = 3,
     Electromagnetic = 4,
-    Gravity        = 5,
-    Fluid          = 6,
-    Custom         = 1000
+    Gravity         = 5,
+    Fluid           = 6,
+    Custom          = 1000
 };
 
 struct FieldSample {
@@ -43,8 +42,6 @@ public:
     // Sample the field at a world-space position.
     // Implementations may be analytic, grid-based, GPU, or live hardware.
     virtual void sample(const Vec3& position, FieldSample& out) const = 0;
-
-    // Optional: sample a volume / ray later
 };
 
 // ---------------------------------------------------------------------------
@@ -53,13 +50,13 @@ public:
 
 class OpticalField : public Field {
 public:
+    explicit OpticalField(FieldID id) : id_(id) {}
+
     FieldType   type() const override { return FieldType::Optical; }
     FieldID     id()   const override { return id_; }
     std::string name() const override { return "OpticalField"; }
 
     void sample(const Vec3& position, FieldSample& out) const override;
-
-    explicit OpticalField(FieldID id) : id_(id) {}
 
 private:
     FieldID id_;
@@ -67,13 +64,13 @@ private:
 
 class ThermalField : public Field {
 public:
+    explicit ThermalField(FieldID id) : id_(id) {}
+
     FieldType   type() const override { return FieldType::Thermal; }
     FieldID     id()   const override { return id_; }
     std::string name() const override { return "ThermalField"; }
 
     void sample(const Vec3& position, FieldSample& out) const override;
-
-    explicit ThermalField(FieldID id) : id_(id) {}
 
 private:
     FieldID id_;
@@ -81,13 +78,13 @@ private:
 
 class AcousticField : public Field {
 public:
+    explicit AcousticField(FieldID id) : id_(id) {}
+
     FieldType   type() const override { return FieldType::Acoustic; }
     FieldID     id()   const override { return id_; }
     std::string name() const override { return "AcousticField"; }
 
     void sample(const Vec3& position, FieldSample& out) const override;
-
-    explicit AcousticField(FieldID id) : id_(id) {}
 
 private:
     FieldID id_;
@@ -118,20 +115,6 @@ public:
         return it != fields_.end() ? it->second.get() : nullptr;
     }
 
-    // Convenience typed sample
-    template <typename FieldT>
-    FieldSample sample(const Vec3& position) const {
-        FieldSample out;
-        for (const auto& [_, f] : fields_) {
-            if (f->type() == FieldT{0}.type()) { // type match via temporary
-                f->sample(position, out);
-                return out;
-            }
-        }
-        return out; // invalid
-    }
-
-    // Better: sample by type enum
     FieldSample sample(FieldType type, const Vec3& position) const {
         FieldSample out;
         for (const auto& [_, f] : fields_) {
@@ -140,7 +123,7 @@ public:
                 return out;
             }
         }
-        return out;
+        return out; // invalid
     }
 
     size_t count() const { return fields_.size(); }

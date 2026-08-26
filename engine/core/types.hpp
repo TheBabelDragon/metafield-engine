@@ -1,9 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <array>
-#include <string>
-#include <string_view>
 
 namespace mf {
 
@@ -11,11 +8,11 @@ namespace mf {
 // Fundamental IDs — stable across simulation, network, and replay
 // ---------------------------------------------------------------------------
 
-using EntityID   = uint64_t;
+using EntityID    = uint64_t;
 using ComponentID = uint32_t;
-using FieldID    = uint32_t;
-using AssetID    = uint64_t;
-using WorkID     = uint64_t;
+using FieldID     = uint32_t;
+using AssetID     = uint64_t;
+using WorkID      = uint64_t;
 
 constexpr EntityID INVALID_ENTITY = 0;
 
@@ -39,9 +36,9 @@ struct Quat {
 };
 
 struct Transform {
-    Vec3  position{0.f, 0.f, 0.f};
-    Quat  rotation{};
-    Vec3  scale{1.f, 1.f, 1.f};
+    Vec3 position{0.f, 0.f, 0.f};
+    Quat rotation{};
+    Vec3 scale{1.f, 1.f, 1.f};
 };
 
 // ---------------------------------------------------------------------------
@@ -49,9 +46,9 @@ struct Transform {
 // ---------------------------------------------------------------------------
 
 struct SimulationVersion {
-    uint32_t major = 0;
-    uint32_t minor = 1;
-    uint32_t patch = 0;
+    uint32_t major      = 0;
+    uint32_t minor      = 1;
+    uint32_t patch      = 0;
     uint32_t rules_hash = 0; // hash of active simulation rules
 };
 
