@@ -8,8 +8,7 @@
   html, body { margin:0; height:100%; background:#06080c; color:#d7e0ea;
     font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; overflow:hidden; }
   #wrap { display:grid; grid-template-rows: 48px 1fr 28px; height:100%; }
-  header, footer { display:flex; align-items:center; gap:14px; padding:0 16px;
-    background:#0b0f14; border-color:#1b2430; }
+  header, footer { display:flex; align-items:center; gap:14px; padding:0 16px; background:#0b0f14; }
   header { border-bottom:1px solid #1b2430; }
   footer { border-top:1px solid #1b2430; color:#6d7f90; font-size:12px; }
   h1 { font-size:13px; letter-spacing:.18em; margin:0; font-weight:650; }
@@ -20,16 +19,16 @@
   .meta { margin-left:auto; opacity:.8; }
   #stage { position:relative; min-height:0; }
   #world { width:100%; height:100%; display:block; background:#070a10; }
-  #side { position:absolute; top:12px; left:12px; width:240px;
+  #side, #insp { position:absolute; top:12px; width:236px;
     background:rgba(10,14,20,.86); border:1px solid #1c2733; border-radius:10px; padding:12px; }
-  #insp { position:absolute; top:12px; right:12px; width:230px;
-    background:rgba(10,14,20,.86); border:1px solid #1c2733; border-radius:10px; padding:12px; }
+  #side { left:12px; } #insp { right:12px; }
   h2 { margin:0 0 8px; font-size:10px; letter-spacing:.14em; color:#8aa0b5; }
   canvas#bars { width:100%; height:88px; display:block; background:#080b10; border-radius:6px; }
   .meter { display:grid; grid-template-columns: 54px 1fr 36px; gap:6px; align-items:center; margin:6px 0; }
   .bar { height:8px; background:#18202a; border-radius:6px; overflow:hidden; }
   .bar > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#2ee6a6,#7cff6b); }
   .hint { color:#8aa0b5; font-size:12px; margin-top:8px; }
+  #insp div { padding:5px 0; border-bottom:1px solid #1a2430; }
 </style>
 <div id="wrap">
   <header>
@@ -41,7 +40,7 @@
   <div id="stage">
     <canvas id="world"></canvas>
     <div id="side">
-      <h2>SUBCARRIERS</h2>
+      <h2>FIELD</h2>
       <canvas id="bars" width="400" height="88"></canvas>
       <div class="meter"><span>rssi</span><div class="bar"><i id="m_rssi"></i></div><span id="t_rssi">—</span></div>
       <div class="meter"><span>energy</span><div class="bar"><i id="m_e"></i></div><span id="t_e">—</span></div>
@@ -50,149 +49,32 @@
     </div>
     <div id="insp">
       <h2>WORLD</h2>
-      <div id="bodies">waiting…</div>
+      <div id="list">waiting…</div>
     </div>
   </div>
-  <footer>3D viewport · CSI as field intensity · does not bind :4210</footer>
+  <footer>World-owned entities · CSI as field · http://127.0.0.1:8765</footer>
 </div>
 <script>
 const world = document.getElementById('world');
 const wctx = world.getContext('2d');
 const bars = document.getElementById('bars');
 const bctx = bars.getContext('2d');
-let yaw = 0.7, pitch = 0.55, zoom = 18, dragging = false, lx=0, ly=0;
-let state = {packets:0, bodies:[], latest:{}};
-
-function resize(){
-  const r = world.parentElement.getBoundingClientRect();
-  world.width = r.width * devicePixelRatio;
-  world.height = r.height * devicePixelRatio;
-}
-addEventListener('resize', resize);
-resize();
-world.addEventListener('pointerdown', e => { dragging = true; lx=e.clientX; ly=e.clientY; world.setPointerCapture(e.pointerId); });
+let yaw = 0.75, pitch = 0.52, zoom = 18, dragging = false, lx=0, ly=0;
+let state = {packets:0, world:[], latest:{}};
+function resize(){ const r = world.parentElement.getBoundingClientRect(); world.width = r.width * devicePixelRatio; world.height = r.height * devicePixelRatio; }
+addEventListener('resize', resize); resize();
+world.addEventListener('pointerdown', e => { dragging=true; lx=e.clientX; ly=e.clientY; world.setPointerCapture(e.pointerId); });
 world.addEventListener('pointerup', () => dragging=false);
-world.addEventListener('pointermove', e => {
-  if (!dragging) return;
-  yaw += (e.clientX-lx)*0.006;
-  pitch = Math.max(0.15, Math.min(1.2, pitch + (e.clientY-ly)*0.006));
-  lx=e.clientX; ly=e.clientY;
-});
+world.addEventListener('pointermove', e => { if (!dragging) return; yaw += (e.clientX-lx)*0.006; pitch = Math.max(0.15, Math.min(1.2, pitch + (e.clientY-ly)*0.006)); lx=e.clientX; ly=e.clientY; });
 world.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(8, Math.min(40, zoom + e.deltaY*0.02)); }, {passive:false});
-
 function clamp01(v){ return Math.max(0, Math.min(1, Number(v)||0)); }
-function project(x,y,z){
-  const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
-  let rx = x*cy - z*sy;
-  let rz = x*sy + z*cy;
-  let ry = y;
-  const ty = ry*cp - rz*sp;
-  const tz = ry*sp + rz*cp;
-  const f = (world.height*0.55) / (tz + zoom);
-  return [world.width/2 + rx*f, world.height*0.62 - ty*f, tz];
-}
-function line(a,b,col){
-  wctx.strokeStyle = col; wctx.beginPath();
-  wctx.moveTo(a[0],a[1]); wctx.lineTo(b[0],b[1]); wctx.stroke();
-}
-function cube(x,y,z,sx,sy,sz, col){
-  const p = (dx,dy,dz)=>project(x+dx,y+dy,z+dz);
-  const pts = [
-    p(-sx,0,-sz), p(sx,0,-sz), p(sx,0,sz), p(-sx,0,sz),
-    p(-sx,sy,-sz), p(sx,sy,-sz), p(sx,sy,sz), p(-sx,sy,sz)
-  ];
-  const faces = [[0,1,2,3],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];
-  const order = faces.map((f,i)=>({i, z:(pts[f[0]][2]+pts[f[1]][2]+pts[f[2]][2]+pts[f[3]][2])/4}));
-  order.sort((a,b)=>b.z-a.z);
-  for (const o of order){
-    const f = faces[o.i];
-    wctx.beginPath();
-    wctx.moveTo(pts[f[0]][0], pts[f[0]][1]);
-    for (let k=1;k<4;k++) wctx.lineTo(pts[f[k]][0], pts[f[k]][1]);
-    wctx.closePath();
-    wctx.fillStyle = col;
-    wctx.globalAlpha = 0.85;
-    wctx.fill();
-    wctx.globalAlpha = 1;
-    wctx.strokeStyle = 'rgba(255,255,255,.18)';
-    wctx.stroke();
-  }
-}
-function drawWorld(){
-  const w=world.width, h=world.height;
-  wctx.fillStyle='#070a10'; wctx.fillRect(0,0,w,h);
-  const e = clamp01(state.latest && state.latest.energy);
-  // ground grid
-  wctx.lineWidth = 1;
-  for (let i=-6;i<=6;i++){
-    line(project(i,0,-6), project(i,0,6), '#15202c');
-    line(project(-6,0,i), project(6,0,i), '#15202c');
-  }
-  // field slab under the origin — intensity lifts/colors the ground
-  cube(0,0,0, 3.2, 0.08+e*0.35, 3.2, state.latest && state.latest.synthetic ? 'rgba(255,180,70,.28)' : 'rgba(40,220,140,.28)');
-  // static first-universe props
-  cube(-2.2,0,-1.6, 0.7, 1.1, 0.7, '#3a4656'); // house
-  cube(-2.2,1.1,-1.6, 0.78, 0.35, 0.78, '#2a3340');
-  cube(2.4,0,-2.0, 0.18, 1.6, 0.18, '#2f4a38'); // tree trunk
-  cube(2.4,1.4,-2.0, 0.7, 0.7, 0.7, '#1f6b3e');
-  cube(0,0,2.2, 0.28, 0.9, 0.28, '#6aa0ff'); // player
-  const bodies = state.bodies || [];
-  const N = Math.max(bodies.length,1);
-  bodies.forEach((b,i)=>{
-    const ang = -Math.PI/2 + (i/N)*Math.PI*2;
-    const x = Math.cos(ang)*2.6, z = Math.sin(ang)*2.6;
-    const hgt = 0.4 + clamp01(b.energy)*1.6;
-    cube(x,0,z, 0.35, hgt, 0.35, b.synthetic ? '#c9842a' : '#2ee6a6');
-    const p = project(x, hgt+0.2, z);
-    wctx.fillStyle='#d7e0ea';
-    wctx.font = (12*devicePixelRatio)+'px ui-sans-serif';
-    wctx.fillText(b.id||'body', p[0]+6, p[1]);
-  });
-}
-function drawBars(csi){
-  const w=bars.width,h=bars.height;
-  bctx.fillStyle='#080b10'; bctx.fillRect(0,0,w,h);
-  if(!csi||!csi.length) return;
-  const n=csi.length, gap=2, bw=Math.max(2,(w-12)/n-gap);
-  for(let i=0;i<n;i++){
-    const v=clamp01(csi[i]); const bh=v*(h-10);
-    bctx.fillStyle='rgb('+(20+220*v)+','+(80+120*(1-v))+','+(40+40*(1-v))+')';
-    bctx.fillRect(6+i*(bw+gap), h-4-bh, bw, bh);
-  }
-}
-function setMeter(id,tId,v){
-  v=clamp01(v);
-  document.getElementById(id).style.width=(v*100).toFixed(1)+'%';
-  document.getElementById(tId).textContent=v.toFixed(2);
-}
-async function tick(){
-  try{
-    const r=await fetch('/state',{cache:'no-store'});
-    state=await r.json();
-    const latest=state.latest||{};
-    const badge=document.getElementById('badge');
-    if(!state.packets){ badge.className='badge wait'; badge.textContent='WAIT'; }
-    else if(latest.synthetic){ badge.className='badge syn'; badge.textContent='SYN'; }
-    else { badge.className='badge live'; badge.textContent='LIVE'; }
-    document.getElementById('src').textContent = latest.body_id||'';
-    document.getElementById('stats').textContent =
-      'packets '+(state.packets||0)+'   bodies '+(state.bodies?state.bodies.length:0)+'   t '+Number(state.sim_t||0).toFixed(2)+'s';
-    document.getElementById('hint').textContent = state.jsonl_missing
-      ? 'JSONL missing — synthetic world. Start metafield_bridge for LIVE.'
-      : 'drag to orbit · wheel to zoom';
-    drawBars(latest.csi);
-    setMeter('m_rssi','t_rssi', latest.rssi);
-    setMeter('m_e','t_e', latest.energy);
-    setMeter('m_s','t_s', latest.spread);
-    const box=document.getElementById('bodies');
-    const props = '<div><b>house</b> static</div><div><b>tree</b> static</div><div><b>player</b> static</div>';
-    if(!state.bodies||!state.bodies.length) box.innerHTML = props;
-    else box.innerHTML = props + state.bodies.map(b=>
-      '<div><b>'+b.id+'</b> E='+Number(b.energy).toFixed(2)+'</div>').join('');
-  }catch(e){}
-  drawWorld();
-}
-setInterval(tick, 40);
-tick();
+function project(x,y,z){ const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch); let rx = x*cy - z*sy; let rz = x*sy + z*cy; const ty = y*cp - rz*sp; const tz = y*sp + rz*cp; const f = (world.height*0.55) / (tz + zoom); return [world.width/2 + rx*f, world.height*0.62 - ty*f, tz]; }
+function line(a,b,col){ wctx.strokeStyle=col; wctx.beginPath(); wctx.moveTo(a[0],a[1]); wctx.lineTo(b[0],b[1]); wctx.stroke(); }
+function cube(x,y,z,sx,sy,sz,col){ const p=(dx,dy,dz)=>project(x+dx,y+dy,z+dz); const pts=[p(-sx,0,-sz),p(sx,0,-sz),p(sx,0,sz),p(-sx,0,sz),p(-sx,sy,-sz),p(sx,sy,-sz),p(sx,sy,sz),p(-sx,sy,sz)]; const faces=[[0,1,2,3],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]]; const order=faces.map((f,i)=>({i,z:(pts[f[0]][2]+pts[f[1]][2]+pts[f[2]][2]+pts[f[3]][2])/4})); order.sort((a,b)=>b.z-a.z); for (const o of order){ const f=faces[o.i]; wctx.beginPath(); wctx.moveTo(pts[f[0]][0],pts[f[0]][1]); for(let k=1;k<4;k++) wctx.lineTo(pts[f[k]][0],pts[f[k]][1]); wctx.closePath(); wctx.globalAlpha=0.88; wctx.fillStyle=col; wctx.fill(); wctx.globalAlpha=1; wctx.strokeStyle='rgba(255,255,255,.16)'; wctx.stroke(); } }
+function drawWorld(){ const w=world.width,h=world.height; wctx.fillStyle='#070a10'; wctx.fillRect(0,0,w,h); wctx.lineWidth=1; for(let i=-6;i<=6;i++){ line(project(i,0,-6),project(i,0,6),'#15202c'); line(project(-6,0,i),project(6,0,i),'#15202c'); } const e=clamp01(state.latest && state.latest.energy); cube(0,0,0,3.2,0.06+e*0.3,3.2, state.latest && state.latest.synthetic ? 'rgba(255,180,70,.25)' : 'rgba(40,220,140,.25)'); const ents = state.world || []; for (const ent of ents){ cube(ent.x||0, ent.y||0, ent.z||0, ent.sx||0.3, ent.sy||0.8, ent.sz||0.3, ent.color||'#88a0b8'); const p = project(ent.x||0, (ent.y||0)+(ent.sy||0.8)+0.15, ent.z||0); wctx.fillStyle='#d7e0ea'; wctx.font=(11*devicePixelRatio)+'px ui-sans-serif'; wctx.fillText(ent.name||ent.kind||'', p[0]+4, p[1]); } }
+function drawBars(csi){ const w=bars.width,h=bars.height; bctx.fillStyle='#080b10'; bctx.fillRect(0,0,w,h); if(!csi||!csi.length) return; const n=csi.length,gap=2,bw=Math.max(2,(w-12)/n-gap); for(let i=0;i<n;i++){ const v=clamp01(csi[i]); const bh=v*(h-10); bctx.fillStyle='rgb('+(20+220*v)+','+(80+120*(1-v))+','+(40+40*(1-v))+')'; bctx.fillRect(6+i*(bw+gap), h-4-bh, bw, bh); } }
+function setMeter(id,tId,v){ v=clamp01(v); document.getElementById(id).style.width=(v*100).toFixed(1)+'%'; document.getElementById(tId).textContent=v.toFixed(2); }
+async function tick(){ try{ const r=await fetch('/state',{cache:'no-store'}); state=await r.json(); const latest=state.latest||{}; const badge=document.getElementById('badge'); if(!state.packets){ badge.className='badge wait'; badge.textContent='WAIT'; } else if(latest.synthetic){ badge.className='badge syn'; badge.textContent='SYN'; } else { badge.className='badge live'; badge.textContent='LIVE'; } document.getElementById('src').textContent = latest.body_id||''; document.getElementById('stats').textContent = 'entities '+(state.entities||0)+'   packets '+(state.packets||0)+'   t '+Number(state.sim_t||0).toFixed(2)+'s'; document.getElementById('hint').textContent = state.jsonl_missing ? 'JSONL missing — synthetic World. Start metafield_bridge for LIVE.' : 'drag to orbit · wheel to zoom'; drawBars(latest.csi); setMeter('m_rssi','t_rssi', latest.rssi); setMeter('m_e','t_e', latest.energy); setMeter('m_s','t_s', latest.spread); document.getElementById('list').innerHTML = (state.world||[]).map(e => '<div><b>'+e.name+'</b> '+e.kind+'</div>').join('') || 'empty'; }catch(err){} drawWorld(); }
+setInterval(tick, 40); tick();
 </script>
 </html>
