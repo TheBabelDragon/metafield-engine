@@ -1,4 +1,4 @@
-// hello-view — CSI visualization + SYN / EST occupancy toggle
+// hello-view — CSI visualization + FieldTick readout
 #include "engine/world/world.hpp"
 #include "engine/world/demo_universe.hpp"
 #include "engine/ecs/components.hpp"
@@ -8,6 +8,7 @@
 #include "engine/ingest/jsonl_tail.hpp"
 #include "engine/ingest/synthetic_csi.hpp"
 #include "engine/renderer/hud_server.hpp"
+#include "engine/substrate/scheduler.hpp"
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -44,6 +45,14 @@ int main(int argc,char** argv){
     World world; auto& csi_field=seed_demo_universe(world);
     JsonlTail tail(path,true); bool file_live=!force_synth&&tail.file_exists();
     std::unordered_map<std::string,EntityID> sensors; CsiInferencer infer; std::mutex infer_mu; CsiEstimate last_est; std::atomic<bool> est_mode{false};
+    VoxelField vox; vox.reserve_box({0,0,0},{7,0,7});
+    vox.write({3,0,3}, Channel::Temperature, 42.81f);
+    vox.write({3,0,3}, Channel::Information, 0.74f);
+    vox.write({4,0,3}, Channel::Temperature, 20.0f);
+    FieldScheduler fsched;
+    fsched.add(std::make_unique<DiffusionSystem>(0.45f, Boundary::Closed));
+    fsched.add(std::make_unique<InformationDecaySystem>(0.12f));
+    FieldTick last_tick; std::mutex tick_mu;
     HudServer hud; const bool hud_ok=hud.start(port,[&](){
         auto latest=csi_field.latest(); auto bodies=csi_field.bodies(); CsiEstimate est; {std::lock_guard<std::mutex> g(infer_mu); est=last_est;}
         std::ostringstream os;
@@ -62,9 +71,22 @@ int main(int argc,char** argv){
             os<<"{\"id\":"<<b.id<<",\"x\":"<<b.x<<",\"z\":"<<b.z<<",\"vx\":"<<b.vx<<",\"vz\":"<<b.vz
               <<",\"rx\":"<<b.rx<<",\"rz\":"<<b.rz<<",\"angle\":"<<b.angle<<",\"energy\":"<<b.energy
               <<",\"motion\":"<<b.motion<<",\"age\":"<<b.age<<",\"trail\":"<<farr(b.trail)<<",\"contour\":"<<farr(b.contour)<<"}"; }
-        os<<"]},\"world\":["; bool first=true;
+        os<<"]},\"tick\":{";
+        FieldTick tk; {std::lock_guard<std::mutex> g(tick_mu); tk=last_tick;}
+        os<<"\"seq\":"<<tk.sequence<<",\"time\":"<<tk.time<<",\"dt\":"<<tk.dt
+          <<",\"temp_changed\":"<<tk.deltas.count_channel(Channel::Temperature)
+          <<",\"info_changed\":"<<tk.deltas.count_channel(Channel::Information);
+        auto emit_focus=[&](Channel ch){
+            const FieldDelta* d=tk.deltas.find({3,0,3}, ch);
+            float cur=vox.sample({3,0,3}, ch);
+            os<<"{\"old\":"<<(d?d->old_value:cur)<<",\"new\":"<<(d?d->new_value:cur)
+              <<",\"system\":\""<<system_name(d?d->system_id:0)<<"\"}";
+        };
+        os<<",\"focus\":{\"x\":3,\"y\":0,\"z\":3,\"temperature\:"; emit_focus(Channel::Temperature);
+        os<<",\"information\:"; emit_focus(Channel::Information); os<<"}}";
+        os<<",\"world\":["; bool first=true;
         world.entities().each<Name,Transform,Renderable>([&](EntityID id,Name& name,Transform& tr,Renderable& rend){
-            if(!first) os<<','; first=false; float energy=0,rssi=0; bool syn=false;
+            if(!first) { os<<','; } first=false; float energy=0,rssi=0; bool syn=false;
             if(rend.kind=="sensor"){ auto bit=bodies.find(name.value); if(bit!=bodies.end()){ energy=bit->second.last.region("csi_energy"); rssi=bit->second.last.region("rssi"); syn=bit->second.last.synthetic; } }
             os<<"{\"id\":"<<id<<",\"name\":\""<<json_escape(name.value)<<"\",\"kind\":\""<<json_escape(rend.kind)<<"\""
               <<",\"x\":"<<tr.position.x<<",\"y\":"<<tr.position.y<<",\"z\":"<<tr.position.z
@@ -79,7 +101,7 @@ int main(int argc,char** argv){
     using clock=std::chrono::steady_clock; const auto start=clock::now(); auto next_synth=start; std::uint64_t synth_tick=0;
     while(g_run){
         if(seconds>0 && std::chrono::duration_cast<std::chrono::seconds>(clock::now()-start).count()>=seconds) break;
-        if(!force_synth && !file_live && tail.file_exists()){ file_live=true; std::cout<<"[ingest] live JSONL appeared \u2014 "<<url<<"\n"; }
+        if(!force_synth && !file_live && tail.file_exists()){ file_live=true; std::cout<<"[ingest] live JSONL appeared — "<<url<<"\n"; }
         if(file_live){ for(int n=0;n<64;++n){ auto line=tail.poll(); if(!line) break; auto obs=parse_csi_line(*line); if(!obs.valid) continue; csi_field.ingest(obs); upsert_sensor(world,sensors,obs); infer.push(obs); } }
         else { auto now=clock::now(); if(now>=next_synth){ auto obs=make_synthetic_csi(synth_tick++); csi_field.ingest(obs); upsert_sensor(world,sensors,obs); infer.push(obs); next_synth=now+std::chrono::milliseconds(80);} }
         { std::lock_guard<std::mutex> g(infer_mu); last_est=infer.estimate(); }
@@ -89,7 +111,7 @@ int main(int argc,char** argv){
             else if(name.value=="npc") tr.position.x=1.4f+std::sin(t*0.55f)*0.6f;
             else if(rend.kind=="sensor"){ auto bit=bodies.find(name.value); float e=bit==bodies.end()?0.f:bit->second.last.region("csi_energy"); bool syn=bit!=bodies.end()&&bit->second.last.synthetic; rend.sy=0.35f+e*1.8f; rend.color=syn?0xc9842au:0x2ee6a6u; }
         });
-        world.tick(1.0/60.0); std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        { auto tk=fsched.step(vox, 1.f/60.f); std::lock_guard<std::mutex> g(tick_mu); last_tick=std::move(tk);} world.tick(1.0/60.0); std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     hud.stop(); std::cout<<"[ok] packets="<<csi_field.packet_count()<<"\n"<<url<<"\n"; return hud_ok?0:1;
 }
