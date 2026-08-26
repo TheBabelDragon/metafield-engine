@@ -3,17 +3,17 @@
 ```
 ESP32  --UDP 4210-->  csi-bridge.py  -->  /tmp/metafield/csi.jsonl
                                               ^
-hello_view --live tails ----------------------+--> http://127.0.0.1:8765
+hello_view --live tails ----------------------+--> HUD + terminal status
 ```
 
-## CSI source
+## Radios
 
 ```bash
 cd ~/wifi-sensing-system/esp32
 ./flash.sh --standard -p /dev/ttyUSB0 -e --monitor
 ```
 
-JSON `wifi_csi` on UDP **4210** (`node`, `rssi`, `csi`). Aim nodes at this host.
+JSON `wifi_csi` on UDP **4210**. Aim nodes at this host.
 
 ## Engine
 
@@ -24,18 +24,24 @@ chmod +x scripts/run-live.sh scripts/csi-bridge.py
 ./scripts/run-live.sh
 ```
 
-Open http://127.0.0.1:8765 and click the canvas.
+Browser opens http://127.0.0.1:8765. Click the canvas for keys.
 
-## Final test
+## Final test (no curl)
 
-- Badge is LIVE, not SYN
-- packet count climbs while you move in front of the radios
-- EST draws occupancy from that stream
-- arrows / WASD move the player cube
+Watch the **same terminal** that launched `run-live.sh`:
 
-```bash
-curl -s http://127.0.0.1:8765/state | python -c 'import json,sys;s=json.load(sys.stdin);print(s["latest"]["synthetic"], s["packets"], s["live"])'
-# False  <n>  True
+```
+[status] WAIT  packets=0  body=-  synthetic=no
+[LIVE] PASS  real CSI  body=esp32-lab  packets=1
+[status] LIVE  packets=40  body=esp32-lab  synthetic=no  +
+[player] keys active
 ```
 
-`--live` never starts the synthetic generator.
+Pass when:
+
+- terminal prints `[LIVE] PASS`
+- HUD badge is LIVE (not SYN / WAIT)
+- packet count climbs as you move in front of the radios
+- arrows / WASD move the player after clicking the HUD
+
+`--live` never starts the synthetic generator. WAIT means UDP 4210 is quiet.
