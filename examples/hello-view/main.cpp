@@ -1,4 +1,4 @@
-// hello-view — CSI visualization + FieldTick readout
+// hello-view — live CSI + FieldTick + arrow-key player
 #include "engine/world/world.hpp"
 #include "engine/world/demo_universe.hpp"
 #include "engine/ecs/components.hpp"
@@ -39,13 +39,22 @@ static EntityID upsert_sensor(World& world,std::unordered_map<std::string,Entity
     world.entities().add<SensorTag>(id,SensorTag{obs.body_id});
     sensors[obs.body_id]=id; return id;
 }
+static float clampf(float v,float lo,float hi){ return v<lo?lo:(v>hi?hi:v); }
 int main(int argc,char** argv){
     std::signal(SIGINT,on_sig); std::signal(SIGTERM,on_sig);
-    std::string path=default_jsonl(); bool force_synth=false; int seconds=0, port=8765;
-    for(int i=1;i<argc;++i){ std::string a=argv[i]; if(a=="--synth") force_synth=true; else if(a=="--file"&&i+1<argc) path=argv[++i]; else if(a=="--seconds"&&i+1<argc) seconds=std::atoi(argv[++i]); else if(a=="--port"&&i+1<argc) port=std::atoi(argv[++i]); }
+    std::string path=default_jsonl(); bool force_synth=false; bool live_only=false; int seconds=0, port=8765;
+    for(int i=1;i<argc;++i){ std::string a=argv[i];
+        if(a=="--synth") force_synth=true;
+        else if(a=="--live") live_only=true;
+        else if(a=="--file"&&i+1<argc) path=argv[++i];
+        else if(a=="--seconds"&&i+1<argc) seconds=std::atoi(argv[++i]);
+        else if(a=="--port"&&i+1<argc) port=std::atoi(argv[++i]);
+    }
     World world; auto& csi_field=seed_demo_universe(world);
     JsonlTail tail(path,true); bool file_live=!force_synth&&tail.file_exists();
     std::unordered_map<std::string,EntityID> sensors; CsiInferencer infer; std::mutex infer_mu; CsiEstimate last_est; std::atomic<bool> est_mode{false};
+    std::atomic<bool> player_manual{false};
+    std::atomic<float> player_x{0.f}, player_z{2.2f};
     VoxelField vox; vox.reserve_box({0,0,0},{7,0,7});
     vox.write({3,0,3}, Channel::Temperature, 42.81f);
     vox.write({3,0,3}, Channel::Information, 0.74f);
@@ -61,6 +70,7 @@ int main(int argc,char** argv){
           <<",\"view\":\""<<(est_mode.load()?"est":"syn")<<"\""
           <<",\"live\":"<<(file_live?"true":"false")
           <<",\"jsonl_missing\":"<<(tail.file_exists()?"false":"true")
+          <<",\"player_manual\":"<<(player_manual.load()?"true":"false")
           <<",\"entities\":"<<world.entities().living_count()
           <<",\"latest\":{\"body_id\":\""<<json_escape(latest.body_id)<<"\",\"synthetic\":"<<(latest.synthetic?"true":"false")
           <<",\"rssi\":"<<latest.region("rssi")<<",\"energy\":"<<latest.region("csi_energy")
@@ -84,22 +94,61 @@ int main(int argc,char** argv){
               <<",\"energy\":"<<energy<<",\"rssi\":"<<rssi<<",\"synthetic\":"<<(syn?"true":"false")
               <<",\"color\":\""<<hex_color(rend.color)<<"\"}";
         }); os<<"]}"; return os.str();
-    },[&](std::string_view path){ if(path.find("view=est")!=std::string_view::npos) est_mode.store(true); if(path.find("view=syn")!=std::string_view::npos) est_mode.store(false); return std::string("{\"view\":\"")+(est_mode.load()?"est":"syn")+"\"}"; });
+    },[&](std::string_view path){
+        if(path.find("view=est")!=std::string_view::npos) est_mode.store(true);
+        if(path.find("view=syn")!=std::string_view::npos) est_mode.store(false);
+        auto apply=[&](float dx,float dz){
+            player_manual.store(true);
+            player_x.store(clampf(player_x.load()+dx,-3.2f,3.2f));
+            player_z.store(clampf(player_z.load()+dz,-3.2f,3.2f));
+        };
+        if(path.find("move=up")!=std::string_view::npos) apply(0.f,-0.28f);
+        else if(path.find("move=down")!=std::string_view::npos) apply(0.f,0.28f);
+        else if(path.find("move=left")!=std::string_view::npos) apply(-0.28f,0.f);
+        else if(path.find("move=right")!=std::string_view::npos) apply(0.28f,0.f);
+        std::ostringstream os;
+        os<<"{\"view\":\""<<(est_mode.load()?"est":"syn")<<"\",\"player_manual\":"
+          <<(player_manual.load()?"true":"false")<<",\"x\":"<<player_x.load()<<",\"z\":"<<player_z.load()<<"}";
+        return os.str();
+    });
     const std::string url="http://127.0.0.1:"+std::to_string(port);
     std::cout<<"\n================================================\n MetaField Engine HUD\n "<<url<<(hud_ok?"\n":"  [bind failed]\n")<<"================================================\n";
-    std::cout<<" jsonl : "<<path<<(tail.file_exists()?"  [present]\n":"  [missing]\n")<<" toggle: SYN / EST\n stop  : Ctrl+C\n\n";
+    std::cout<<" jsonl : "<<path<<(tail.file_exists()?"  [present]\n":"  [missing]\n")
+             <<" mode  : "<<(live_only?"LIVE-ONLY (no synthetic)\n":"auto (file or synthetic)\n")
+             <<" keys  : arrows / WASD move player\n toggle: SYN / EST\n stop  : Ctrl+C\n\n";
     using clock=std::chrono::steady_clock; const auto start=clock::now(); auto next_synth=start; std::uint64_t synth_tick=0;
     while(g_run){
         if(seconds>0 && std::chrono::duration_cast<std::chrono::seconds>(clock::now()-start).count()>=seconds) break;
         if(!force_synth && !file_live && tail.file_exists()){ file_live=true; std::cout<<"[ingest] live JSONL appeared — "<<url<<"\n"; }
-        if(file_live){ for(int n=0;n<64;++n){ auto line=tail.poll(); if(!line) break; auto obs=parse_csi_line(*line); if(!obs.valid) continue; csi_field.ingest(obs); upsert_sensor(world,sensors,obs); infer.push(obs); } }
-        else { auto now=clock::now(); if(now>=next_synth){ auto obs=make_synthetic_csi(synth_tick++); csi_field.ingest(obs); upsert_sensor(world,sensors,obs); infer.push(obs); next_synth=now+std::chrono::milliseconds(80);} }
-        { std::lock_guard<std::mutex> g(infer_mu); last_est=infer.estimate(); }
+        if(file_live){
+            for(int n=0;n<64;++n){
+                auto line=tail.poll(); if(!line) break;
+                auto obs=parse_csi_line(*line); if(!obs.valid) continue;
+                obs.synthetic=false;
+                if(line->find("\"synthetic\":true")!=std::string::npos) obs.synthetic=true;
+                csi_field.ingest(obs); upsert_sensor(world,sensors,obs); infer.push(obs);
+            }
+        } else if(!live_only) {
+            auto now=clock::now();
+            if(now>=next_synth){
+                auto obs=make_synthetic_csi(synth_tick++);
+                csi_field.ingest(obs); upsert_sensor(world,sensors,obs); infer.push(obs);
+                next_synth=now+std::chrono::milliseconds(80);
+            }
+        }
+        { std::lock_guard<std::mutex> g(infer_mu); last_est=infer.estimate(); last_est.live = file_live && !force_synth; }
         const float t=float(world.time().simulation_time); const auto bodies=csi_field.bodies();
         world.entities().each<Name,Transform,Renderable>([&](EntityID,Name& name,Transform& tr,Renderable& rend){
-            if(name.value=="player"){ tr.position.x=std::sin(t*0.35f)*1.6f; tr.position.z=2.2f+std::cos(t*0.35f)*0.4f; }
-            else if(name.value=="npc") tr.position.x=1.4f+std::sin(t*0.55f)*0.6f;
-            else if(rend.kind=="sensor"){ auto bit=bodies.find(name.value); float e=bit==bodies.end()?0.f:bit->second.last.region("csi_energy"); bool syn=bit!=bodies.end()&&bit->second.last.synthetic; rend.sy=0.35f+e*1.8f; rend.color=syn?0xc9842au:0x2ee6a6u; }
+            if(name.value=="player"){
+                if(player_manual.load()){ tr.position.x=player_x.load(); tr.position.z=player_z.load(); }
+                else { tr.position.x=std::sin(t*0.35f)*1.6f; tr.position.z=2.2f+std::cos(t*0.35f)*0.4f; player_x.store(tr.position.x); player_z.store(tr.position.z); }
+            } else if(name.value=="npc") tr.position.x=1.4f+std::sin(t*0.55f)*0.6f;
+            else if(rend.kind=="sensor"){
+                auto bit=bodies.find(name.value);
+                float e=bit==bodies.end()?0.f:bit->second.last.region("csi_energy");
+                bool syn=bit!=bodies.end()&&bit->second.last.synthetic;
+                rend.sy=0.35f+e*1.8f; rend.color=syn?0xc9842au:0x2ee6a6u;
+            }
         });
         { auto tk=fsched.step(vox, 1.f/60.f); std::lock_guard<std::mutex> g(tick_mu); last_tick=std::move(tk);} world.tick(1.0/60.0); std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
