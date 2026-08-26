@@ -33,19 +33,17 @@ inline std::string load_hud_page() {
         auto s = ss.str();
         if (!s.empty()) return s;
     }
-    return "<!doctype html><meta charset=utf-8><title>MetaField</title>"
-           "<body style='background:#111;color:#9f9;font-family:sans-serif'>"
-           "<h1>MetaField Engine</h1><p>HUD page file not found.</p>"
-           "<pre id=s></pre><script>async function t(){s.textContent=await (await fetch('/state')).text()}"
-           "setInterval(t,200);t()</script>";
+    return "<!doctype html><meta charset=utf-8><title>MetaField</title><p>HUD page file not found.</p>";
 }
 
 class HudServer {
 public:
     using StateFn = std::function<std::string()>;
+    using CmdFn   = std::function<std::string(std::string_view path)>;
 
-    bool start(int port, StateFn state) {
+    bool start(int port, StateFn state, CmdFn cmd = {}) {
         state_ = std::move(state);
+        cmd_ = std::move(cmd);
         page_ = load_hud_page();
         port_ = port;
         fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -97,29 +95,38 @@ private:
         const ssize_t n = ::recv(c, buf, sizeof(buf) - 1, 0);
         if (n <= 0) return;
         buf[n] = 0;
-        const bool want_state = std::strstr(buf, "GET /state") != nullptr;
-        const std::string& body = want_state ? scratch_ : page_;
-        std::string state;
-        const std::string* send = &page_;
-        if (want_state) {
-            state = state_ ? state_() : "{}";
-            send = &state;
+        std::string path = "/";
+        if (const char* sp = std::strchr(buf, ' ')) {
+            const char* start = sp + 1;
+            const char* end = std::strchr(start, ' ');
+            if (end) path.assign(start, end);
+            else path = start;
         }
-        const char* type = want_state ? "application/json" : "text/html; charset=utf-8";
+        std::string payload;
+        const char* type = "text/html; charset=utf-8";
+        if (path.rfind("/state", 0) == 0) {
+            payload = state_ ? state_() : "{}";
+            type = "application/json";
+        } else if (path.rfind("/mode", 0) == 0) {
+            payload = cmd_ ? cmd_(path) : "{\"ok\":false}";
+            type = "application/json";
+        } else {
+            payload = page_;
+        }
         char hdr[256];
         const int hlen = std::snprintf(
             hdr, sizeof(hdr),
             "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
-            "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
-            type, send->size());
+            "Cache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n"
+            "Connection: close\r\n\r\n",
+            type, payload.size());
         ::send(c, hdr, static_cast<size_t>(hlen), 0);
-        ::send(c, send->data(), send->size(), 0);
-        (void)body;
+        ::send(c, payload.data(), payload.size(), 0);
     }
 
     StateFn state_;
+    CmdFn cmd_;
     std::string page_;
-    std::string scratch_;
     std::thread th_;
     std::atomic<bool> run_{false};
     int fd_ = -1;
