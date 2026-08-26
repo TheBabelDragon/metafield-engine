@@ -115,11 +115,15 @@ int main(int argc,char** argv){
     std::cout<<"\n================================================\n MetaField Engine HUD\n "<<url<<(hud_ok?"\n":"  [bind failed]\n")<<"================================================\n";
     std::cout<<" jsonl : "<<path<<(tail.file_exists()?"  [present]\n":"  [missing]\n")
              <<" mode  : "<<(live_only?"LIVE-ONLY (no synthetic)\n":"auto (file or synthetic)\n")
-             <<" keys  : arrows / WASD move player\n toggle: SYN / EST\n stop  : Ctrl+C\n\n";
-    using clock=std::chrono::steady_clock; const auto start=clock::now(); auto next_synth=start; std::uint64_t synth_tick=0;
+             <<" keys  : arrows / WASD move player (click the HUD first)\n"
+             <<" test  : watch this terminal for [LIVE] PASS  and the HUD badge\n"
+             <<" stop  : Ctrl+C\n\n";
+    using clock=std::chrono::steady_clock; const auto start=clock::now();
+    auto next_synth=start; auto next_status=start;
+    std::uint64_t synth_tick=0, last_pk=0; bool announced_live=false, announced_player=false;
     while(g_run){
         if(seconds>0 && std::chrono::duration_cast<std::chrono::seconds>(clock::now()-start).count()>=seconds) break;
-        if(!force_synth && !file_live && tail.file_exists()){ file_live=true; std::cout<<"[ingest] live JSONL appeared — "<<url<<"\n"; }
+        if(!force_synth && !file_live && tail.file_exists()){ file_live=true; std::cout<<"[ingest] jsonl ready\n"; }
         if(file_live){
             for(int n=0;n<64;++n){
                 auto line=tail.poll(); if(!line) break;
@@ -137,6 +141,28 @@ int main(int argc,char** argv){
             }
         }
         { std::lock_guard<std::mutex> g(infer_mu); last_est=infer.estimate(); last_est.live = file_live && !force_synth; }
+        const auto latest=csi_field.latest();
+        const auto pk=csi_field.packet_count();
+        if(pk>0 && !latest.synthetic && !announced_live){
+            announced_live=true;
+            std::cout<<"[LIVE] PASS  real CSI  body="<<latest.body_id<<"  packets="<<pk<<"\n"<<std::flush;
+        }
+        if(player_manual.load() && !announced_player){
+            announced_player=true;
+            std::cout<<"[player] keys active\n"<<std::flush;
+        }
+        const auto now=clock::now();
+        if(now>=next_status){
+            next_status=now+std::chrono::seconds(2);
+            const bool live=pk>0 && !latest.synthetic;
+            std::cout<<"[status] "<<(live?"LIVE":(live_only?"WAIT":"SYN"))
+                     <<"  packets="<<pk
+                     <<"  body="<<(latest.body_id.empty()?"-":latest.body_id)
+                     <<"  synthetic="<<(latest.synthetic?"yes":"no")
+                     <<(pk>last_pk?"  +":"")
+                     <<"\n"<<std::flush;
+            last_pk=pk;
+        }
         const float t=float(world.time().simulation_time); const auto bodies=csi_field.bodies();
         world.entities().each<Name,Transform,Renderable>([&](EntityID,Name& name,Transform& tr,Renderable& rend){
             if(name.value=="player"){
@@ -152,5 +178,9 @@ int main(int argc,char** argv){
         });
         { auto tk=fsched.step(vox, 1.f/60.f); std::lock_guard<std::mutex> g(tick_mu); last_tick=std::move(tk);} world.tick(1.0/60.0); std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    hud.stop(); std::cout<<"[ok] packets="<<csi_field.packet_count()<<"\n"<<url<<"\n"; return hud_ok?0:1;
+    hud.stop();
+    const auto latest=csi_field.latest();
+    const bool pass=csi_field.packet_count()>0 && !latest.synthetic;
+    std::cout<<(pass?"[LIVE] PASS":"[LIVE] WAIT")<<"  packets="<<csi_field.packet_count()<<"\n"<<url<<"\n";
+    return hud_ok?0:1;
 }
