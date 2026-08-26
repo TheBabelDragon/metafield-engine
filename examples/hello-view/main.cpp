@@ -82,8 +82,8 @@ int main(int argc,char** argv){
             os<<"{\"old\":"<<(d?d->old_value:cur)<<",\"new\":"<<(d?d->new_value:cur)
               <<",\"system\":\""<<system_name(d?d->system_id:0)<<"\"}";
         };
-        os<<",\"focus\":{\"x\":3,\"y\":0,\"z\":3,\"temperature\:"; emit_focus(Channel::Temperature);
-        os<<",\"information\:"; emit_focus(Channel::Information); os<<"}}";
+        os<<",\"focus\":{\"x\":3,\"y\":0,\"z\":3,\"temperature\":"; emit_focus(Channel::Temperature);
+        os<<",\"information\":"; emit_focus(Channel::Information); os<<"}}";
         os<<",\"world\":["; bool first=true;
         world.entities().each<Name,Transform,Renderable>([&](EntityID id,Name& name,Transform& tr,Renderable& rend){
             if(!first) { os<<','; } first=false; float energy=0,rssi=0; bool syn=false;
