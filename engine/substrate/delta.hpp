@@ -5,6 +5,11 @@
 #include <cstdint>
 #include <vector>
 namespace mf {
+constexpr std::uint32_t SYS_DIFFUSION = 1;
+constexpr std::uint32_t SYS_INFO_DECAY = 2;
+constexpr std::uint32_t SYS_ADVECTION = 3;
+constexpr std::uint32_t SYS_CSI_INPUT = 4;
+constexpr std::uint32_t SYS_DECAY = 5;
 struct FieldDelta {
     CellCoord cell{};
     Channel channel = Channel::Energy;
@@ -13,6 +18,16 @@ struct FieldDelta {
     std::uint64_t tick = 0;
     std::uint32_t system_id = 0;
 };
+inline const char* system_name(std::uint32_t id) {
+    switch (id) {
+        case 1: return "diffusion";
+        case 2: return "information_decay";
+        case 3: return "advection";
+        case 4: return "csi";
+        case 5: return "decay";
+        default: return "unknown";
+    }
+}
 class FieldDeltaList {
 public:
     void push(FieldDelta d) { if (d.old_value == d.new_value) return; items_.push_back(d); }
@@ -36,6 +51,9 @@ public:
     std::size_t count_channel(Channel ch) const {
         std::size_t n = 0; for (const auto& d : items_) if (d.channel == ch) ++n; return n;
     }
+    std::size_t count_system(std::uint32_t id) const {
+        std::size_t n = 0; for (const auto& d : items_) if (d.system_id == id) ++n; return n;
+    }
     const FieldDelta* find(CellCoord c, Channel ch) const {
         for (const auto& d : items_)
             if (d.cell.x == c.x && d.cell.y == c.y && d.cell.z == c.z && d.channel == ch) return &d;
@@ -50,12 +68,4 @@ struct FieldTick {
     float dt = 0.f;
     FieldDeltaList deltas;
 };
-inline const char* system_name(std::uint32_t id) {
-    switch (id) {
-        case 1: return "diffusion";
-        case 2: return "information_decay";
-        case 3: return "advection";
-        default: return "unknown";
-    }
-}
 } // namespace mf
