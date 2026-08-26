@@ -1,17 +1,20 @@
 # MetaField Engine — Architecture
 
-World is the single source of truth. Renderer, hardware, and Aurora consume it.
+Simulation substrate first. Game engine second.
 
-## v0 (this repo)
+## Two layers
 
-- World + ECS + Time + Fields
-- Demo universe seeded in World: house, tree, light, player, NPC
-- CSI ingest from `/tmp/metafield/csi.jsonl` or synthetic fallback
-- Sensors become World entities
-- Local HUD at http://127.0.0.1:8765 draws those entities
+1. **VoxelField** — Field / Chunk / Cell / Channel. Rules write FieldDelta.
+2. **World ECS** — entities (house, player, CSI body) that sit on the field.
+
+CSI and the HUD are observers. They do not own the universe.
+
+## v0.2 in this repo
+
+- `engine/substrate/` FieldDelta spine + DiffusionSystem
+- `examples/hello-field` heat slice
+- World + ECS + CSI HUD (`hello_view`)
 
 Does not bind UDP :4210.
 
-## Not in v0
-
-Vulkan/SDL native renderer · optical-body / echo-grid adapters · Aurora fabric · distributed scheduler.
+See `docs/TAXONOMY.md` for the full 00–18 map.
