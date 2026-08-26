@@ -5,10 +5,9 @@
 <title>MetaField Engine</title>
 <style>
   :root { color-scheme: dark; }
-  html, body { margin:0; height:100%; background:#06080c; color:#d7e0ea;
-    font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; overflow:hidden; }
-  #wrap { display:grid; grid-template-rows: 48px 1fr 28px; height:100%; }
-  header, footer { display:flex; align-items:center; gap:14px; padding:0 16px; background:#0b0f14; }
+  html, body { margin:0; height:100%; background:#05070b; color:#d7e0ea; font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; overflow:hidden; }
+  #wrap { display:grid; grid-template-rows: 52px 1fr 28px; height:100%; }
+  header, footer { display:flex; align-items:center; gap:12px; padding:0 14px; background:#0b0f14; }
   header { border-bottom:1px solid #1b2430; }
   footer { border-top:1px solid #1b2430; color:#6d7f90; font-size:12px; }
   h1 { font-size:13px; letter-spacing:.18em; margin:0; font-weight:650; }
@@ -17,13 +16,16 @@
   .syn  { background:#3a2a10; color:#ffc46b; }
   .wait { background:#222; color:#889; }
   .meta { margin-left:auto; opacity:.8; }
+  .tog { display:flex; border:1px solid #2a3644; border-radius:8px; overflow:hidden; }
+  .tog button { background:#121820; color:#9aafc0; border:0; padding:6px 12px; cursor:pointer; font-weight:700; letter-spacing:.08em; font-size:11px; }
+  .tog button.on-syn { background:#3a2a10; color:#ffc46b; }
+  .tog button.on-est { background:#12351f; color:#5dffa3; }
   #stage { position:relative; min-height:0; }
   #world { width:100%; height:100%; display:block; background:#070a10; }
-  #side, #insp { position:absolute; top:12px; width:236px;
-    background:rgba(10,14,20,.86); border:1px solid #1c2733; border-radius:10px; padding:12px; }
+  #side, #insp { position:absolute; top:12px; width:250px; background:rgba(10,14,20,.9); border:1px solid #1c2733; border-radius:10px; padding:12px; }
   #side { left:12px; } #insp { right:12px; }
   h2 { margin:0 0 8px; font-size:10px; letter-spacing:.14em; color:#8aa0b5; }
-  canvas#bars { width:100%; height:88px; display:block; background:#080b10; border-radius:6px; }
+  canvas.panel { width:100%; display:block; background:#080b10; border-radius:6px; }
   .meter { display:grid; grid-template-columns: 54px 1fr 36px; gap:6px; align-items:center; margin:6px 0; }
   .bar { height:8px; background:#18202a; border-radius:6px; overflow:hidden; }
   .bar > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#2ee6a6,#7cff6b); }
@@ -33,6 +35,10 @@
 <div id="wrap">
   <header>
     <h1>METAFIELD ENGINE</h1>
+    <div class="tog">
+      <button id="btn-syn">SYN</button>
+      <button id="btn-est">EST</button>
+    </div>
     <span id="badge" class="badge wait">WAIT</span>
     <span id="src"></span>
     <span class="meta" id="stats"></span>
@@ -40,161 +46,141 @@
   <div id="stage">
     <canvas id="world"></canvas>
     <div id="side">
-      <h2>FIELD</h2>
-      <canvas id="bars" width="400" height="88"></canvas>
+      <h2>SUBCARRIERS</h2>
+      <canvas id="bars" class="panel" width="420" height="86"></canvas>
+      <h2 style="margin-top:10px">WATERFALL</h2>
+      <canvas id="fall" class="panel" width="420" height="110"></canvas>
       <div class="meter"><span>rssi</span><div class="bar"><i id="m_rssi"></i></div><span id="t_rssi">—</span></div>
       <div class="meter"><span>energy</span><div class="bar"><i id="m_e"></i></div><span id="t_e">—</span></div>
-      <div class="meter"><span>spread</span><div class="bar"><i id="m_s"></i></div><span id="t_s">—</span></div>
-      <div class="hint" id="hint">drag orbit · wheel zoom · double-click reset</div>
+      <div class="meter"><span>motion</span><div class="bar"><i id="m_m"></i></div><span id="t_m">—</span></div>
+      <div class="hint" id="hint">SYN = demo world · EST = CSI occupancy boundaries</div>
     </div>
     <div id="insp">
-      <h2>WORLD</h2>
-      <div id="list">waiting…</div>
+      <h2>ESTIMATE</h2>
+      <div id="elist">toggle EST for inferred shapes</div>
+      <h2 style="margin-top:12px">WORLD</h2>
+      <div id="list"></div>
     </div>
   </div>
-  <footer>free orbit · CSI tiles on the ground · http://127.0.0.1:8765</footer>
+  <footer>drag orbit · wheel zoom · double-click reset · http://127.0.0.1:8765</footer>
 </div>
 <script>
 const world = document.getElementById('world');
 const wctx = world.getContext('2d');
 const bars = document.getElementById('bars');
 const bctx = bars.getContext('2d');
+const fall = document.getElementById('fall');
+const fctx = fall.getContext('2d');
 const LIM = 1.45;
 let yaw = 0.85, pitch = 0.72, zoom = 14, dragging = false, lx=0, ly=0;
-let state = {packets:0, world:[], latest:{}};
+let state = {packets:0, world:[], latest:{}, estimate:{}, view:'syn'};
+const water = [];
 function resetCam(){ yaw = 0.85; pitch = 0.72; zoom = 14; }
-function resize(){
-  const r = world.parentElement.getBoundingClientRect();
-  world.width = r.width * devicePixelRatio;
-  world.height = r.height * devicePixelRatio;
-}
+function resize(){ const r = world.parentElement.getBoundingClientRect(); world.width = r.width * devicePixelRatio; world.height = r.height * devicePixelRatio; }
 addEventListener('resize', resize); resize();
 world.addEventListener('pointerdown', e => { dragging=true; lx=e.clientX; ly=e.clientY; world.setPointerCapture(e.pointerId); });
 world.addEventListener('pointerup', () => dragging=false);
-world.addEventListener('pointermove', e => {
-  if (!dragging) return;
-  yaw += (e.clientX-lx)*0.007;
-  pitch = Math.max(-LIM, Math.min(LIM, pitch - (e.clientY-ly)*0.007));
-  lx=e.clientX; ly=e.clientY;
-});
+world.addEventListener('pointermove', e => { if (!dragging) return; yaw += (e.clientX-lx)*0.007; pitch = Math.max(-LIM, Math.min(LIM, pitch - (e.clientY-ly)*0.007)); lx=e.clientX; ly=e.clientY; });
 world.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(6, Math.min(36, zoom + e.deltaY*0.02)); }, {passive:false});
 world.addEventListener('dblclick', resetCam);
+async function setView(v){ await fetch('/mode?view='+v, {cache:'no-store'}); }
+document.getElementById('btn-syn').onclick = () => setView('syn');
+document.getElementById('btn-est').onclick = () => setView('est');
 function clamp01(v){ return Math.max(0, Math.min(1, Number(v)||0)); }
 function project(x,y,z){
-  const r = zoom;
-  const eyeY = r * Math.sin(pitch);
-  const ch = r * Math.cos(pitch);
-  const eyeX = ch * Math.sin(yaw);
-  const eyeZ = ch * Math.cos(yaw);
-  const fx0 = -eyeX, fy0 = 0.45-eyeY, fz0 = -eyeZ;
-  const fl = Math.hypot(fx0,fy0,fz0) || 1;
+  const r = zoom; const eyeY = r * Math.sin(pitch); const ch = r * Math.cos(pitch);
+  const eyeX = ch * Math.sin(yaw); const eyeZ = ch * Math.cos(yaw);
+  const fx0 = -eyeX, fy0 = 0.45-eyeY, fz0 = -eyeZ; const fl = Math.hypot(fx0,fy0,fz0) || 1;
   const fx=fx0/fl, fy=fy0/fl, fz=fz0/fl;
-  let rx=-fz, ry=0, rz=fx;
-  let rl=Math.hypot(rx,ry,rz);
-  if (rl < 1e-4) { rx=1; ry=0; rz=0; rl=1; }
-  rx/=rl; rz/=rl;
-  const ux = ry*fz - rz*fy;
-  const uy = rz*fx - rx*fz;
-  const uz = rx*fy - ry*fx;
+  let rx=-fz, ry=0, rz=fx; let rl=Math.hypot(rx,ry,rz); if (rl < 1e-4) { rx=1; ry=0; rz=0; rl=1; } rx/=rl; rz/=rl;
+  const ux = ry*fz - rz*fy, uy = rz*fx - rx*fz, uz = rx*fy - ry*fx;
   const dx=x-eyeX, dy=y-eyeY, dz=z-eyeZ;
-  const cx=dx*rx+dy*ry+dz*rz;
-  const cy=dx*ux+dy*uy+dz*uz;
-  const cz=dx*fx+dy*fy+dz*fz;
+  const cx=dx*rx+dy*ry+dz*rz, cy=dx*ux+dy*uy+dz*uz, cz=dx*fx+dy*fy+dz*fz;
   const f=(world.height*0.72)/Math.max(0.35, cz);
   return [world.width/2+cx*f, world.height/2-cy*f, cz];
 }
-function line(a,b,col){ wctx.strokeStyle=col; wctx.beginPath(); wctx.moveTo(a[0],a[1]); wctx.lineTo(b[0],b[1]); wctx.stroke(); }
-function cube(x,y,z,sx,sy,sz,col){
+function line(a,b,col){ wctx.strokeStyle=col; wctx.lineWidth=1; wctx.beginPath(); wctx.moveTo(a[0],a[1]); wctx.lineTo(b[0],b[1]); wctx.stroke(); }
+function cube(x,y,z,sx,sy,sz,col,alpha){
   const p=(dx,dy,dz)=>project(x+dx,y+dy,z+dz);
   const pts=[p(-sx,0,-sz),p(sx,0,-sz),p(sx,0,sz),p(-sx,0,sz),p(-sx,sy,-sz),p(sx,sy,-sz),p(sx,sy,sz),p(-sx,sy,sz)];
   const faces=[[0,1,2,3],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];
   const order=faces.map((f,i)=>({i,z:(pts[f[0]][2]+pts[f[1]][2]+pts[f[2]][2]+pts[f[3]][2])/4}));
   order.sort((a,b)=>a.z-b.z);
   for (const o of order){
-    const f=faces[o.i];
-    if (pts[f[0]][2] < 0.2 && pts[f[2]][2] < 0.2) continue;
-    wctx.beginPath(); wctx.moveTo(pts[f[0]][0],pts[f[0]][1]);
-    for(let k=1;k<4;k++) wctx.lineTo(pts[f[k]][0],pts[f[k]][1]);
-    wctx.closePath();
-    wctx.globalAlpha=0.9; wctx.fillStyle=col; wctx.fill(); wctx.globalAlpha=1;
-    wctx.strokeStyle='rgba(255,255,255,.14)'; wctx.stroke();
+    const f=faces[o.i]; if (pts[f[0]][2] < 0.2 && pts[f[2]][2] < 0.2) continue;
+    wctx.beginPath(); wctx.moveTo(pts[f[0]][0],pts[f[0]][1]); for(let k=1;k<4;k++) wctx.lineTo(pts[f[k]][0],pts[f[k]][1]); wctx.closePath();
+    wctx.globalAlpha=alpha==null?0.9:alpha; wctx.fillStyle=col; wctx.fill(); wctx.globalAlpha=1; wctx.strokeStyle='rgba(255,255,255,.12)'; wctx.stroke();
   }
 }
-function drawField(csi){
-  if (!csi || !csi.length) return;
-  const gx=8, gz=4, n=csi.length;
-  const syn = !!(state.latest && state.latest.synthetic);
-  for (let iz=0; iz<gz; iz++){
-    for (let ix=0; ix<gx; ix++){
-      const i = Math.floor((iz*gx+ix) * n / (gx*gz));
-      const v = clamp01(csi[i]);
-      const x = (ix - gx/2 + 0.5) * 0.72;
-      const z = (iz - gz/2 + 0.5) * 0.72;
-      const a = 0.12 + v*0.6;
-      const col = syn ? ('rgba(255,180,70,'+a+')') : ('rgba(46,230,166,'+a+')');
-      cube(x, 0, z, 0.30, 0.03+v*0.7, 0.30, col);
+function drawGrid(){ for(let i=-6;i<=6;i++){ line(project(i,0,-6),project(i,0,6),'#15202c'); line(project(-6,0,i),project(6,0,i),'#15202c'); } }
+function drawEstimate(){
+  const est = state.estimate || {}; const grid = est.grid || []; const gw = est.gw||0, gz=est.gz||0;
+  if (gw && gz && grid.length === gw*gz){
+    let peak=0.0001; for (const v of grid) if (v>peak) peak=v;
+    const worldSpan=6, cell=worldSpan/gw;
+    for (let z=0;z<gz;z++) for (let x=0;x<gw;x++){
+      const v = grid[z*gw+x]/peak; if (v < 0.12) continue;
+      const px = (x+0.5)/gw*worldSpan - worldSpan/2; const pz = (z+0.5)/gz*worldSpan - worldSpan/2;
+      const a = 0.08 + v*0.55; const col = est.live ? ('rgba(46,230,166,'+a+')') : ('rgba(255,180,70,'+a+')');
+      cube(px,0,pz, cell*0.46, 0.02+v*0.85, cell*0.46, col, 0.85);
     }
   }
+  (est.blobs||[]).forEach((b,i)=>{
+    const c = (b.contour||[]);
+    if (c.length >= 4){
+      const pts=[]; for (let k=0;k<c.length;k+=2) pts.push(project(c[k], 0.04, c[k+1]));
+      wctx.beginPath(); wctx.moveTo(pts[0][0], pts[0][1]); for (let k=1;k<pts.length;k++) wctx.lineTo(pts[k][0], pts[k][1]); wctx.closePath();
+      wctx.strokeStyle = est.live ? '#5dffa3' : '#ffc46b'; wctx.lineWidth = 2 * devicePixelRatio; wctx.stroke();
+      wctx.fillStyle = est.live ? 'rgba(93,255,163,.10)' : 'rgba(255,196,107,.10)'; wctx.fill();
+    }
+    cube(b.x||0, 0, b.z||0, Math.max(0.12,(b.rx||0.4)*0.35), 0.15+(b.energy||0)*0.9, Math.max(0.12,(b.rz||0.4)*0.35), est.live ? '#2ee6a6' : '#c9842a', 0.55);
+    const p = project(b.x||0, 0.4+(b.energy||0), b.z||0);
+    wctx.fillStyle='#e8f4ee'; wctx.font=(11*devicePixelRatio)+'px ui-sans-serif';
+    wctx.fillText('blob '+i+'  E='+Number(b.energy||0).toFixed(2), p[0]+4, p[1]);
+  });
 }
 function drawWorld(){
-  wctx.fillStyle='#070a10'; wctx.fillRect(0,0,world.width,world.height);
-  wctx.lineWidth=1;
-  for(let i=-6;i<=6;i++){
-    line(project(i,0,-6),project(i,0,6),'#15202c');
-    line(project(-6,0,i),project(6,0,i),'#15202c');
-  }
-  drawField(state.latest && state.latest.csi);
-  const ents = (state.world||[]).slice().sort((a,b)=>{
-    return project(a.x||0,a.y||0,a.z||0)[2] - project(b.x||0,b.y||0,b.z||0)[2];
-  });
+  wctx.fillStyle='#070a10'; wctx.fillRect(0,0,world.width,world.height); drawGrid();
+  const estOn = state.view === 'est'; if (estOn) drawEstimate();
+  const ents = (state.world||[]).slice().sort((a,b)=> project(a.x||0,a.y||0,a.z||0)[2]-project(b.x||0,b.y||0,b.z||0)[2]);
   for (const ent of ents){
-    cube(ent.x||0, ent.y||0, ent.z||0, ent.sx||0.3, ent.sy||0.8, ent.sz||0.3, ent.color||'#88a0b8');
+    if (estOn && ent.kind !== 'sensor') continue;
+    cube(ent.x||0, ent.y||0, ent.z||0, ent.sx||0.3, ent.sy||0.8, ent.sz||0.3, ent.color||'#88a0b8', estOn?0.7:0.9);
     const p = project(ent.x||0, (ent.y||0)+(ent.sy||0.8)+0.12, ent.z||0);
     if (p[2] < 0.4) continue;
-    wctx.fillStyle='#d7e0ea';
-    wctx.font=(11*devicePixelRatio)+'px ui-sans-serif';
-    wctx.fillText(ent.name||ent.kind||'', p[0]+4, p[1]);
+    wctx.fillStyle='#d7e0ea'; wctx.font=(11*devicePixelRatio)+'px ui-sans-serif'; wctx.fillText(ent.name||ent.kind||'', p[0]+4, p[1]);
   }
 }
 function drawBars(csi){
-  const w=bars.width,h=bars.height;
-  bctx.fillStyle='#080b10'; bctx.fillRect(0,0,w,h);
-  if(!csi||!csi.length) return;
+  const w=bars.width,h=bars.height; bctx.fillStyle='#080b10'; bctx.fillRect(0,0,w,h); if(!csi||!csi.length) return;
   const n=csi.length,gap=2,bw=Math.max(2,(w-12)/n-gap);
-  for(let i=0;i<n;i++){
-    const v=clamp01(csi[i]); const bh=v*(h-10);
-    bctx.fillStyle='rgb('+(20+220*v)+','+(80+120*(1-v))+','+(40+40*(1-v))+')';
-    bctx.fillRect(6+i*(bw+gap), h-4-bh, bw, bh);
-  }
+  for(let i=0;i<n;i++){ const v=clamp01(csi[i]); const bh=v*(h-10); bctx.fillStyle='rgb('+(20+220*v)+','+(80+140*(1-v))+','+(40+80*(1-v))+')'; bctx.fillRect(6+i*(bw+gap), h-4-bh, bw, bh); }
 }
-function setMeter(id,tId,v){
-  v=clamp01(v);
-  document.getElementById(id).style.width=(v*100).toFixed(1)+'%';
-  document.getElementById(tId).textContent=v.toFixed(2);
+function drawFall(csi){
+  if (csi && csi.length){ water.push(csi.slice()); if (water.length > 48) water.shift(); }
+  const w=fall.width,h=fall.height; fctx.fillStyle='#080b10'; fctx.fillRect(0,0,w,h); if (!water.length) return;
+  const rows=water.length, cols=water[0].length, rw=h/rows, cw=(w-4)/cols;
+  for (let r=0;r<rows;r++) for (let c=0;c<cols;c++){ const v=clamp01(water[r][c]); fctx.fillStyle='rgb('+(10+30*v)+','+(20+200*v)+','+(40+80*(1-v))+')'; fctx.fillRect(2+c*cw, r*rw, Math.max(1,cw-0.4), Math.max(1,rw-0.3)); }
 }
+function setMeter(id,tId,v){ v=clamp01(v); document.getElementById(id).style.width=(v*100).toFixed(1)+'%'; document.getElementById(tId).textContent=v.toFixed(2); }
+function syncToggle(){ const v = state.view === 'est' ? 'est' : 'syn'; document.getElementById('btn-syn').className = v==='syn' ? 'on-syn' : ''; document.getElementById('btn-est').className = v==='est' ? 'on-est' : ''; }
 async function tick(){
   try{
-    const r=await fetch('/state',{cache:'no-store'});
-    state=await r.json();
-    const latest=state.latest||{};
-    const badge=document.getElementById('badge');
+    const r=await fetch('/state',{cache:'no-store'}); state=await r.json();
+    const latest=state.latest||{}; const est=state.estimate||{}; const badge=document.getElementById('badge');
     if(!state.packets){ badge.className='badge wait'; badge.textContent='WAIT'; }
+    else if(state.view==='est'){ badge.className=est.live?'badge live':'badge syn'; badge.textContent=est.live?'EST LIVE':'EST SYN'; }
     else if(latest.synthetic){ badge.className='badge syn'; badge.textContent='SYN'; }
     else { badge.className='badge live'; badge.textContent='LIVE'; }
     document.getElementById('src').textContent = latest.body_id||'';
-    document.getElementById('stats').textContent =
-      'entities '+(state.entities||0)+'   packets '+(state.packets||0)+'   t '+Number(state.sim_t||0).toFixed(2)+'s';
-    document.getElementById('hint').textContent = state.jsonl_missing
-      ? 'JSONL missing — synthetic World. Start metafield_bridge for LIVE.'
-      : 'drag orbit · wheel zoom · double-click reset';
-    drawBars(latest.csi);
-    setMeter('m_rssi','t_rssi', latest.rssi);
-    setMeter('m_e','t_e', latest.energy);
-    setMeter('m_s','t_s', latest.spread);
-    document.getElementById('list').innerHTML = (state.world||[]).map(e => {
-      const extra = e.kind==='sensor' ? (' E='+Number(e.energy||0).toFixed(2)) : '';
-      return '<div><b>'+e.name+'</b> '+e.kind+extra+'</div>';
-    }).join('') || 'empty';
+    document.getElementById('stats').textContent = 'pkts '+(state.packets||0)+'   blobs '+((est.blobs||[]).length)+'   t '+Number(state.sim_t||0).toFixed(2)+'s';
+    document.getElementById('hint').textContent = state.view==='est' ? (state.jsonl_missing ? 'EST on synthetic packets — start metafield_bridge for real CSI.' : 'EST from live CSI occupancy.') : 'SYN demo world. Switch EST for inferred boundaries.';
+    drawBars(latest.csi); drawFall(latest.csi);
+    setMeter('m_rssi','t_rssi', latest.rssi); setMeter('m_e','t_e', latest.energy); setMeter('m_m','t_m', est.motion);
+    const blobs=est.blobs||[];
+    document.getElementById('elist').innerHTML = blobs.length ? blobs.map((b,i)=>'<div><b>blob '+i+'</b> E='+Number(b.energy).toFixed(2)+'  m='+Number(b.motion).toFixed(2)+'</div>').join('') : 'no occupancy blobs yet';
+    document.getElementById('list').innerHTML = (state.world||[]).map(e => '<div><b>'+e.name+'</b> '+e.kind+(e.kind==='sensor'?' E='+Number(e.energy||0).toFixed(2):'')+'</div>').join('') || 'empty';
+    syncToggle();
   }catch(err){}
   drawWorld();
 }
