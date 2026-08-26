@@ -51,6 +51,11 @@ struct FieldTick {
     FieldDeltaList deltas;
 };
 inline const char* system_name(std::uint32_t id) {
-    switch (id) { case 1: return "diffusion"; case 2: return "information_decay"; default: return "unknown"; }
+    switch (id) {
+        case 1: return "diffusion";
+        case 2: return "information_decay";
+        case 3: return "advection";
+        default: return "unknown";
+    }
 }
 } // namespace mf
