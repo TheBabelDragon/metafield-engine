@@ -1,4 +1,4 @@
-// hello-view — CSI ingest + localhost visual HUD
+// hello-view — CSI ingest + localhost 3D HUD
 #include "engine/world/world.hpp"
 #include "engine/fields/csi_field.hpp"
 #include "engine/ingest/csi_parse.hpp"
@@ -79,6 +79,8 @@ int main(int argc, char** argv) {
         std::ostringstream os;
         os << "{\"packets\":" << csi_field.packet_count()
            << ",\"sim_t\":" << world.time().simulation_time
+           << ",\"live\":" << (live ? "true" : "false")
+           << ",\"jsonl_missing\":" << (tail.file_exists() ? "false" : "true")
            << ",\"latest\":{"
            << "\"body_id\":\"" << json_escape(latest.body_id) << "\","
            << "\"synthetic\":" << (latest.synthetic ? "true" : "false") << ","
@@ -105,19 +107,19 @@ int main(int argc, char** argv) {
 
     const std::string url = "http://127.0.0.1:" + std::to_string(port);
 
-    std::cout << "\n";
-    std::cout << "================================================\n";
+    std::cout << "\n================================================\n";
     std::cout << " MetaField Engine HUD\n";
-    if (hud_ok) {
-        std::cout << " " << url << "\n";
-    } else {
-        std::cout << " HUD bind failed on " << url << "\n";
-    }
+    std::cout << " " << url << (hud_ok ? "\n" : "  [bind failed]\n");
     std::cout << "================================================\n";
     std::cout << " jsonl : " << path << (tail.file_exists() ? "  [present]\n" : "  [missing]\n");
+    if (!tail.file_exists()) {
+        std::cout << " hint  : JSONL missing is normal until the CSI snake writes it.\n";
+        std::cout << "         HUD still runs on a synthetic field.\n";
+        std::cout << "         LIVE path:\n";
+        std::cout << "           python -m observer.metafield_bridge --udp --out /tmp/metafield/csi.jsonl\n";
+    }
     std::cout << " mode  : " << (live ? "LIVE follow" : "synthetic") << "\n";
-    std::cout << " stop  : Ctrl+C\n";
-    std::cout << "\n";
+    std::cout << " stop  : Ctrl+C\n\n";
     std::cout.flush();
 
     using clock = std::chrono::steady_clock;
@@ -132,7 +134,7 @@ int main(int argc, char** argv) {
         }
         if (!force_synth && !live && tail.file_exists()) {
             live = true;
-            std::cout << "[ingest] live JSONL appeared\n";
+            std::cout << "[ingest] live JSONL appeared — " << url << "\n";
         }
         if (live) {
             for (int n = 0; n < 64; ++n) {
@@ -152,7 +154,6 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     hud.stop();
-    std::cout << "[ok] packets=" << csi_field.packet_count() << "\n";
-    std::cout << url << "\n";
+    std::cout << "[ok] packets=" << csi_field.packet_count() << "\n" << url << "\n";
     return hud_ok ? 0 : 1;
 }
