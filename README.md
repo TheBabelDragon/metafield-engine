@@ -2,9 +2,7 @@
 
 **Unreal-style cross-domain universe engine.**
 
-Canonical World state · ECS · multi-physics Fields · Hardware abstraction · Aurora Fabric · deterministic simulation.
-
-Existing work (`optical-body-s3`, `echo-grid-ultrasonic-os`, Aurora, field-bus, CSI snake, …) becomes **plugins / adapters** around a common world model — not the other way around.
+Canonical World state · ECS · Fields · CSI ingest · live visual HUD.
 
 ---
 
@@ -14,74 +12,53 @@ Existing work (`optical-body-s3`, `echo-grid-ultrasonic-os`, Aurora, field-bus, 
 sudo pacman -S --needed base-devel cmake git
 git clone https://github.com/TheBabelDragon/metafield-engine.git
 cd metafield-engine
-./scripts/run-arch.sh
+bash scripts/run-arch.sh
 ```
 
-That script installs nothing extra, builds the core, runs `hello_world`, then runs `hello_csi` for 8 seconds.
-
-### CSI ingest
-
-`hello_csi` is automatic:
-
-| Situation | What happens |
-|-----------|----------------|
-| `/tmp/metafield/csi.jsonl` exists | Follow it live (throne-room / metafield_bridge output) |
-| File missing | Synthetic 8 Hz CSI so the binary still runs |
-| File appears later | Switches from synthetic → live |
-| Throne Room already on :4210 | Engine does **not** bind the port |
-
-Override path:
+Already cloned:
 
 ```bash
-export METAFIELD_CSI_JSONL=/tmp/metafield/csi.jsonl
-./build/hello_csi
+cd metafield-engine
+git pull
+bash scripts/run-arch.sh
 ```
 
-Leave it running. The terminal is the first visual: RSSI / energy / spread bars + subcarrier sparkline.
+That builds the core, runs the smoke test, starts the HUD, and opens:
 
----
+**http://127.0.0.1:8765**
 
-## Manual build
+No extra libraries. No UDP :4210 bind. Ctrl+C stops it.
+
+### What you should see
+
+- LIVE / SYN badge
+- subcarrier bars
+- RSSI / energy / spread meters
+- field map with each CSI body
+- body list + packet counts
+
+If `/tmp/metafield/csi.jsonl` exists (throne-room / metafield_bridge), the HUD is live.
+If not, it synthesizes an 8 Hz field so the picture still moves.
+
+### Manual
 
 ```bash
 mkdir -p build && cd build
-cmake ..
-cmake --build .
-./hello_world
-./hello_csi --seconds 8
+cmake .. && cmake --build .
+./hello_view
+# then open http://127.0.0.1:8765
 ```
 
 ---
 
-## Repository Layout
+## Status
 
-```
-metafield-engine/
-├── engine/           # World, ECS, Fields, Time, ingest
-├── plugins/csi/      # CSI JSONL adapter notes
-├── examples/
-│   ├── hello-world/
-│   └── hello-csi/
-├── scripts/run-arch.sh
-└── docs/ARCHITECTURE.md
-```
-
----
-
-## Current Status
-
-| Piece                    | State |
-|--------------------------|--------|
-| World + TimeState        | Working |
-| ECS                      | Working |
-| Analytic field stubs     | Working |
-| CSI JSONL ingest         | Working (live file or synthetic) |
-| Terminal field view      | Working |
-| Renderer                 | Not started |
-| Optical / Echo plugins   | Placeholders |
+| Piece | State |
+|-------|--------|
+| World + ECS + Time | Working |
+| CSI JSONL ingest | Working |
+| Local visual HUD | Working |
+| SDL/Vulkan renderer | Not started |
+| Optical / Echo plugins | Placeholders |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
----
-
-*Part of the MetaField physical-field substrate work.*

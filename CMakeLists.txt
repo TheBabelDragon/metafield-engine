@@ -37,6 +37,12 @@ target_link_libraries(hello_world PRIVATE metafield_core)
 add_executable(hello_csi examples/hello-csi/main.cpp)
 target_link_libraries(hello_csi PRIVATE metafield_core)
 
+add_executable(hello_view examples/hello-view/main.cpp)
+target_link_libraries(hello_view PRIVATE metafield_core)
+find_package(Threads REQUIRED)
+target_link_libraries(hello_view PRIVATE Threads::Threads)
+
 enable_testing()
 add_test(NAME hello_world COMMAND hello_world)
 add_test(NAME hello_csi_synth COMMAND hello_csi --synth --seconds 2)
+add_test(NAME hello_view_synth COMMAND hello_view --synth --seconds 2)

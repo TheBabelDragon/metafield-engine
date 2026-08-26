@@ -16,16 +16,31 @@ cd build
 if [[ ! -f CMakeCache.txt ]]; then
   cmake ..
 fi
-cmake --build . --target hello_world hello_csi -j"$(nproc)"
+cmake --build . --target hello_world hello_csi hello_view -j"$(nproc)"
 
 echo
 echo "=== hello_world ==="
 ./hello_world
 echo
-echo "=== hello_csi (8 seconds; Ctrl+C to stop early) ==="
-echo "If /tmp/metafield/csi.jsonl exists it will be followed; otherwise synthetic."
+echo "=== visual HUD ==="
+echo "Opening http://127.0.0.1:8765"
+echo "If /tmp/metafield/csi.jsonl exists it is followed; otherwise synthetic."
+echo "Ctrl+C stops the view."
 echo
-./hello_csi --seconds 8
-echo
-echo "Live follow (until Ctrl+C):"
-echo "  $ROOT/build/hello_csi"
+
+PORT=8765
+./hello_view --port "$PORT" &
+VIEW_PID=$!
+cleanup() { kill "$VIEW_PID" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
+
+sleep 0.4
+if command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "http://127.0.0.1:${PORT}" >/dev/null 2>&1 || true
+elif command -v firefox >/dev/null 2>&1; then
+  firefox "http://127.0.0.1:${PORT}" >/dev/null 2>&1 || true
+else
+  echo "Open this in a browser: http://127.0.0.1:${PORT}"
+fi
+
+wait "$VIEW_PID"
