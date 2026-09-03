@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Physical CYD/ESP32 CSI → /tmp/metafield/csi.jsonl.
-
-Listens UDP 4210 (broadcast + unicast). Announces this host on UDP 4211 so
-the node can unicast back. Optional USB serial (CSIJSON lines).
-"""
+"""Physical CYD/ESP32 CSI + pass-through C3 → /tmp/metafield/csi.jsonl."""
 from __future__ import annotations
 
 import argparse
@@ -36,7 +32,19 @@ def physical_record(pkt: dict, node_hint: str = "") -> dict | None:
     node = str(pkt.get("node") or pkt.get("body_id") or node_hint or "")
     if node.startswith("synthetic"):
         return None
-    if pkt.get("type") not in (None, "wifi_csi") and "csi" not in pkt and "rssi" not in pkt:
+    typ = str(pkt.get("type") or "")
+    btype = str(pkt.get("body_type") or "")
+    if typ in ("c3_swarm", "C3") or btype in ("c3_swarm", "C3") or node.startswith("c3-"):
+        out = dict(pkt)
+        out["type"] = "c3_swarm"
+        out["body_id"] = node or out.get("body_id") or "c3-unknown"
+        out["node"] = out["body_id"]
+        out["body_type"] = "C3"
+        out["kind"] = "C3"
+        out["source_class"] = "physical"
+        out["synthetic"] = False
+        return out
+    if typ not in ("", "wifi_csi") and "csi" not in pkt and "rssi" not in pkt:
         return None
     return {
         "type": "wifi_csi",
@@ -143,6 +151,14 @@ def main() -> int:
                             pkts.append(rec)
                     except Exception:
                         pass
+                elif raw.startswith("C3JSON "):
+                    try:
+                        rec = physical_record(json.loads(raw[7:]))
+                        if rec:
+                            rec["via"] = "serial"
+                            pkts.append(rec)
+                    except Exception:
+                        pass
 
             for rec in pkts:
                 out.write(json.dumps(rec, separators=(",", ":")) + "\n")
@@ -150,7 +166,7 @@ def main() -> int:
                 n += 1
                 if n == 1 or n % 10 == 0 or now - last_report >= 2:
                     print(
-                        f"[csi-bridge] LIVE total={n} node={rec.get('body_id')} via={rec.get('via')}",
+                        f"[csi-bridge] LIVE total={n} node={rec.get('body_id')} kind={rec.get('body_type')} via={rec.get('via')}",
                         flush=True,
                     )
                     last_report = now
