@@ -13,13 +13,16 @@ fi
 
 mkdir -p build
 cd build
-# Always reconfigure so new targets (hello_view) appear in stale build trees.
+# Always reconfigure so new targets appear in stale build trees.
 cmake ..
-cmake --build . --target hello_world hello_csi hello_view scarcity_clock_test -j"$(nproc)"
+cmake --build . --target hello_world hello_csi hello_view scarcity_clock_test world_kernel_test -j"$(nproc)"
 
 echo
 echo "=== hello_world ==="
 ./hello_world
+echo
+echo "=== world kernel ==="
+./world_kernel_test
 echo
 echo "=== scarcity clock ==="
 ./scarcity_clock_test
