@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Discover USB ESP32-C3 nodes from c3-field-swarm and unfold the fleet into jsonl."""
+"""USB ESP32-C3 from c3-field-swarm → jsonl bodies labeled C3."""
 from __future__ import annotations
 
 import glob
@@ -16,7 +16,12 @@ NODE_RE = re.compile(r"\[C3\]\s+node=(\d+)")
 KV_RE = re.compile(r"\[C3\]\s+(temperature|information|energy|signal)=([0-9.+-]+)")
 MEM_RE = re.compile(r"\[C3\]\s+members=(\d+)\s+coordinator=(\d+)")
 TICK_RE = re.compile(r"\[C3\]\s+tick=(\d+)")
-C3_HINT = re.compile(r"(\[C3\]|C3JSON|c3-field-swarm|PHASE_|coordinator:)")
+ONLINE_RE = re.compile(r"^\s*(\d{1,2})\s+ONLINE\b")
+COORD_RE = re.compile(r"coordinator:\s*(\d+)")
+STATE_RE = re.compile(
+    r"temperature=([0-9.+-]+)\s+information=([0-9.+-]+)\s+energy=([0-9.+-]+)\s+signal=([0-9.+-]+)"
+)
+C3_HINT = re.compile(r"(\[C3\]|C3JSON|c3-field-swarm|coordinator:|ONLINE)")
 NOT_C3 = re.compile(r"(ECHO FIELD|wifi_csi|CSIJSON|Eg7)")
 
 
@@ -41,7 +46,8 @@ def node_rec(node_id: int, fields: dict, *, via: str, coordinator=None,
         "synthetic": False,
         "node": nid,
         "body_id": nid,
-        "body_type": "c3_swarm",
+        "body_type": "C3",
+        "kind": "C3",
         "node_id": int(node_id),
         "coordinator": coordinator,
         "tick": tick,
@@ -86,7 +92,7 @@ def unfold(pkt: dict, via: str) -> List[dict]:
             nid = int(mid)
         except (TypeError, ValueError):
             continue
-        if not nid or nid in seen:
+        if nid in seen:
             continue
         seen.add(nid)
         out.append(node_rec(nid, {}, via=f"{via}/member", coordinator=pkt.get("coordinator"),
@@ -100,17 +106,30 @@ class TextAcc:
         self.fields: dict = {}
         self.coordinator = None
         self.tick = None
-        self.member_count = 0
 
     def feed(self, line: str, via: str) -> List[dict]:
         out: List[dict] = []
         if m := NODE_RE.search(line):
             self.node_id = int(m.group(1))
         if m := MEM_RE.search(line):
-            self.member_count = int(m.group(1))
             self.coordinator = int(m.group(2))
         if m := TICK_RE.search(line):
             self.tick = int(m.group(1))
+        if m := COORD_RE.search(line):
+            self.coordinator = int(m.group(1))
+        if m := ONLINE_RE.search(line):
+            out.append(node_rec(int(m.group(1)), dict(self.fields), via=f"{via}/nodes",
+                                coordinator=self.coordinator, tick=self.tick))
+        if m := STATE_RE.search(line):
+            self.fields = {
+                "temperature": float(m.group(1)),
+                "information": float(m.group(2)),
+                "energy": float(m.group(3)),
+                "signal": float(m.group(4)),
+            }
+            if self.node_id:
+                out.append(node_rec(self.node_id, self.fields, via=via,
+                                    coordinator=self.coordinator, tick=self.tick))
         if m := KV_RE.search(line):
             self.fields[m.group(1)] = float(m.group(2))
             if self.node_id:
@@ -127,14 +146,15 @@ def parse_line(raw: str, via: str, acc: TextAcc) -> List[dict]:
         except json.JSONDecodeError:
             return []
         if isinstance(pkt, dict) and pkt.get("type") == "c3_swarm":
-            return unfold(pkt, via)
-    if raw.startswith("[C3]") or raw.startswith("coordinator:"):
-        return acc.feed(raw, via)
-    return []
+            recs = unfold(pkt, via)
+            for r in recs:
+                r["body_type"] = "C3"
+                r["kind"] = "C3"
+            return recs
+    return acc.feed(raw, via)
 
 
 def open_port(serial_mod, path: str):
-    # C3 USB-CDC: DTR/RTS high resets the chip. Leave both low.
     s = serial_mod.Serial()
     s.port = path
     s.baudrate = BAUD
@@ -147,7 +167,7 @@ def open_port(serial_mod, path: str):
     time.sleep(0.05)
     try:
         s.reset_input_buffer()
-        s.write(b"status\n")
+        s.write(b"nodes\nstatus\n")
         s.flush()
     except Exception:
         pass
@@ -165,7 +185,8 @@ def classify_line(raw: str) -> Optional[str]:
 def main() -> int:
     os.makedirs(os.path.dirname(JSONL) or ".", exist_ok=True)
     open(JSONL, "a").close()
-    print(f"[c3-bridge] jsonl={JSONL}", flush=True)
+    found = ports()
+    print(f"[c3-bridge] jsonl={JSONL} ports={found or ['none']}", flush=True)
     serials: Dict[str, object] = {}
     accs: Dict[str, TextAcc] = {}
     kind: Dict[str, str] = {}
@@ -175,6 +196,7 @@ def main() -> int:
     last_poke = 0.0
     last_report = time.time()
     last_id: Dict[int, float] = {}
+    raw_shown: Dict[str, int] = {}
 
     try:
         import serial  # type: ignore
@@ -195,6 +217,7 @@ def main() -> int:
                             serials[p] = open_port(serial, p)
                             accs[p] = TextAcc()
                             kind[p] = "probe"
+                            raw_shown[p] = 0
                             print(f"[c3-bridge] open {p} (no DTR reset)", flush=True)
                         except Exception as e:
                             print(f"[c3-bridge] skip {p}: {e}", flush=True)
@@ -205,7 +228,7 @@ def main() -> int:
                     if kind.get(p) == "other":
                         continue
                     try:
-                        s.write(b"status\n")
+                        s.write(b"nodes\nstatus\n")
                     except Exception:
                         pass
             records: List[dict] = []
@@ -217,10 +240,13 @@ def main() -> int:
                     dead.append(p)
                     continue
                 if raw.strip():
+                    if raw_shown.get(p, 0) < 6:
+                        raw_shown[p] = raw_shown.get(p, 0) + 1
+                        print(f"[c3-bridge] {p}: {raw.strip()[:160]}", flush=True)
                     tag = classify_line(raw)
                     if tag == "other" and kind.get(p) != "c3":
                         kind[p] = "other"
-                        print(f"[c3-bridge] {p} is not a C3 node, ignoring", flush=True)
+                        print(f"[c3-bridge] {p} is CYD/CSI serial, not C3", flush=True)
                         continue
                     if tag == "c3":
                         kind[p] = "c3"
@@ -249,13 +275,13 @@ def main() -> int:
                 seen += 1
                 if seen == 1 or seen % 8 == 0:
                     print(
-                        f"[c3-bridge] LIVE total={seen} node={rec.get('body_id')} "
+                        f"[c3-bridge] LIVE C3 total={seen} node={rec.get('body_id')} "
                         f"fleet={sorted(last_id)} via={rec.get('via')}",
                         flush=True,
                     )
             if seen == 0 and now - last_report >= 5:
                 print(
-                    f"[c3-bridge] WAIT  ports={list(serials) or ports() or ['none']} kind={kind}",
+                    f"[c3-bridge] WAIT C3  ports={list(serials) or ports() or ['none']} kind={kind}",
                     flush=True,
                 )
                 last_report = now
