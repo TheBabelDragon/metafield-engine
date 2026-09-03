@@ -28,14 +28,14 @@ canvas.panel{width:100%;display:block;background:#080b10;border-radius:6px}
 <div class="meter"><span>rssi</span><div class="bar"><i id="m_rssi"></i></div><span id="t_rssi">—</span></div>
 <div class="meter"><span>energy</span><div class="bar"><i id="m_e"></i></div><span id="t_e">—</span></div>
 <div class="meter"><span>motion</span><div class="bar"><i id="m_m"></i></div><span id="t_m">—</span></div>
-<div class="hint" id="hint">live bodies + CSI tracks</div></div>
+<div class="hint" id="hint">SYN staged world · EST CSI tracks</div></div>
 <div id="insp"><h2>BODIES</h2><div id="blist">none yet</div><h2 style="margin-top:12px">TRACKS</h2><div id="elist">toggle EST</div><h2 style="margin-top:12px">WORLD</h2><div id="list"></div></div></div>
-<footer>dynamic field · drag orbit · wheel zoom · double-click reset</footer></div>
+<footer>SYN staged · EST occupancy · drag orbit · wheel zoom</footer></div>
 <script>
 const world=document.getElementById('world'),wctx=world.getContext('2d');
 const bars=document.getElementById('bars'),bctx=bars.getContext('2d');
 const fall=document.getElementById('fall'),fctx=fall.getContext('2d');
-let yaw=0.9,pitch=0.78,zoom=13,dragging=false,lx=0,ly=0,state={packets:0,world:[],bodies:[],latest:{},estimate:{},view:'live'};
+let yaw=0.9,pitch=0.78,zoom=13,dragging=false,lx=0,ly=0,state={packets:0,world:[],bodies:[],latest:{},estimate:{},view:'syn'};
 const water=[],parts=[],shown={};
 function resize(){const r=world.parentElement.getBoundingClientRect();world.width=r.width*devicePixelRatio;world.height=r.height*devicePixelRatio;}
 addEventListener('resize',resize);resize();
@@ -82,7 +82,7 @@ function drawWorld(t){wctx.fillStyle='#05080d';wctx.fillRect(0,0,world.width,wor
  for(let i=-6;i<=6;i++){line(project(i,0,-6),project(i,0,6),'#15202c');line(project(-6,0,i),project(6,0,i),'#15202c');}
  const estOn=state.view==='est'; if(estOn) drawEstimate(t);
  const ents=(state.world||[]).slice().sort((a,b)=>project(a.x||0,0,a.z||0)[2]-project(b.x||0,0,b.z||0)[2]);
- for(const ent of ents){ const bob=ent.kind==='sensor'?0.08*Math.sin(t*4+(ent.id||0)):0;
+ for(const ent of ents){ if(estOn&&ent.kind!=='sensor') continue; const bob=ent.kind==='sensor'?0.08*Math.sin(t*4+(ent.id||0)):0;
   cube(ent.x||0,(ent.y||0)+bob,ent.z||0,ent.sx||0.3,ent.sy||0.8,ent.sz||0.3,ent.color||'#88a0b8',estOn?0.7:0.9);
   const p=project(ent.x||0,(ent.y||0)+(ent.sy||0.8)+0.12,ent.z||0); if(p[2]<0.4)continue; wctx.fillStyle='#d7e0ea'; wctx.font=(11*devicePixelRatio)+'px ui-sans-serif'; wctx.fillText(ent.name||'',p[0]+4,p[1]); }
 }
@@ -94,14 +94,14 @@ function setM(id,tId,v){v=clamp01(v);document.getElementById(id).style.width=(v*
 function bodyLine(b){return '<div><b>'+(b.id||'?')+'</b> '+(b.kind||'')+' pk='+(b.packets||0)+'</div>'}
 async function pull(){try{const r=await fetch('/state',{cache:'no-store'});state=await r.json(); const latest=state.latest||{},est=state.estimate||{},badge=document.getElementById('badge');
  const bodies=state.bodies||[];
- if(!state.packets){badge.className='badge wait';badge.textContent='WAIT';}
- else if(state.view==='est'){badge.className=est.live?'badge live':'badge syn';badge.textContent=est.live?'EST LIVE':'EST SYN';}
- else {badge.className=latest.synthetic?'badge syn':'badge live';badge.textContent=latest.synthetic?'SYN':'LIVE';}
+ if(state.view==='est'){badge.className=est.live?'badge live':'badge syn';badge.textContent=est.live?'EST LIVE':'EST';}
+ else if(!state.packets){badge.className='badge wait';badge.textContent='SYN';}
+ else {badge.className='badge live';badge.textContent='SYN LIVE';}
  document.getElementById('src').textContent=latest.body_id||'';
  document.getElementById('stats').textContent='pkts '+(state.packets||0)+'  bodies '+bodies.length+'  tracks '+((est.blobs||[]).length)+'  t '+Number(state.sim_t||0).toFixed(2)+'s';
- document.getElementById('hint').textContent=bodies.length?('live '+bodies.map(b=>b.id).join(' ')):'waiting for C3 serial / CYD UDP';
+ document.getElementById('hint').textContent=state.view==='est'?'EST CSI occupancy':'SYN staged world + live bodies';
  drawBars(latest.csi);drawFall(latest.csi); setM('m_rssi','t_rssi',latest.rssi);setM('m_e','t_e',latest.energy);setM('m_m','t_m',est.motion);
- document.getElementById('blist').innerHTML=bodies.length?bodies.map(bodyLine).join(''):'none yet';
+ document.getElementById('blist').innerHTML=bodies.length?bodies.map(bodyLine).join(''):'none yet — plug one C3 USB';
  document.getElementById('elist').innerHTML=(est.blobs||[]).length?est.blobs.map(b=>'<div><b>T'+(b.id||0)+'</b> E='+Number(b.energy).toFixed(2)+'</div>').join(''):'no CSI tracks';
  document.getElementById('list').innerHTML=(state.world||[]).map(e=>'<div><b>'+e.name+'</b> '+e.kind+'</div>').join('')||'empty';
  document.getElementById('btn-syn').className=state.view==='syn'?'on-syn':''; document.getElementById('btn-est').className=state.view==='est'?'on-est':'';}catch(e){}}
