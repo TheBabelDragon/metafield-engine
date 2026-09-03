@@ -6,6 +6,7 @@
 #include "engine/fields/csi_infer.hpp"
 #include "engine/ingest/csi_parse.hpp"
 #include "engine/ingest/jsonl_tail.hpp"
+#include "engine/ingest/body_pose.hpp"
 #include "engine/renderer/hud_server.hpp"
 #include "engine/substrate/scheduler.hpp"
 #include "engine/substrate/tick_json.hpp"
@@ -28,13 +29,13 @@ static const char* default_jsonl(){ const char* e=std::getenv("METAFIELD_CSI_JSO
 static std::string json_escape(const std::string& s){ std::string o; for(char c:s){ if(c=='"'||c=='\\'){o.push_back('\\');o.push_back(c);} else o.push_back(c);} return o; }
 static std::string farr(const std::vector<float>& v){ std::ostringstream os; os<<'['; for(size_t i=0;i<v.size();++i){ if(i) os<<','; os<<v[i]; } os<<']'; return os.str(); }
 static std::string hex_color(std::uint32_t c){ std::ostringstream os; os<<'#'<<std::hex<<std::setw(6)<<std::setfill('0')<<(c&0xffffff); return os.str(); }
-static Vec3 sensor_pos(const std::string& id){ std::uint32_t h=2166136261u; for(unsigned char c:id) h=(h^c)*16777619u; float ang=float(h%360)*0.017453292f, r=1.7f+float(h%90)/90.f; return Vec3{std::cos(ang)*r,0.f,std::sin(ang)*r}; }
+static Vec3 sensor_pos(const std::string& id){ return body_pose(id); }
 static EntityID upsert_sensor(World& world,std::unordered_map<std::string,EntityID>& sensors,const FieldObservation& obs){
     auto it=sensors.find(obs.body_id); if(it!=sensors.end()) return it->second;
     EntityID id=world.spawn();
     world.entities().add<Name>(id,Name{obs.body_id});
     world.entities().add<Transform>(id,Transform{sensor_pos(obs.body_id)});
-    world.entities().add<Renderable>(id,Renderable{"sensor",0.32f,0.6f,0.32f,0x2ee6a6u});
+    world.entities().add<Renderable>(id,Renderable{"sensor",0.32f,0.6f,0.32f,body_color(obs.body_type,obs.body_id)});
     world.entities().add<SensorTag>(id,SensorTag{obs.body_id});
     sensors[obs.body_id]=id; return id;
 }
@@ -71,7 +72,7 @@ int main(int argc,char** argv){
           <<",\"player_manual\":"<<(player_manual.load()?"true":"false")
           <<",\"entities\":"<<world.entities().living_count()
           <<",\"latest\":{\"body_id\":\""<<json_escape(latest.body_id)<<"\",\"synthetic\":false"
-          <<",\"rssi\":"<<latest.region("rssi")<<",\"energy\":"<<latest.region("csi_energy")
+          <<",\"rssi\":"<<latest.region("rssi")<<",\"energy\":"<<latest.region("energy", latest.region("csi_energy"))
           <<",\"spread\":"<<latest.region("csi_spread")<<",\"csi\":"<<farr(latest.csi)
           <<"},\"estimate\":{\"live\":"<<(est.live?"true":"false")<<",\"motion\":"<<est.motion
           <<",\"energy\":"<<est.energy<<",\"gw\":"<<est.gw<<",\"gz\":"<<est.gz
@@ -85,13 +86,23 @@ int main(int argc,char** argv){
         os<<",\"world\":["; bool first=true;
         world.entities().each<Name,Transform,Renderable>([&](EntityID id,Name& name,Transform& tr,Renderable& rend){
             if(!first) { os<<','; } first=false; float energy=0,rssi=0;
-            if(rend.kind=="sensor"){ auto bit=bodies.find(name.value); if(bit!=bodies.end()){ energy=bit->second.last.region("csi_energy"); rssi=bit->second.last.region("rssi"); } }
+            if(rend.kind=="sensor"){ auto bit=bodies.find(name.value); if(bit!=bodies.end()){ energy=bit->second.last.region("energy", bit->second.last.region("csi_energy")); rssi=bit->second.last.region("rssi"); } }
             os<<"{\"id\":"<<id<<",\"name\":\""<<json_escape(name.value)<<"\",\"kind\":\""<<json_escape(rend.kind)<<"\""
               <<",\"x\":"<<tr.position.x<<",\"y\":"<<tr.position.y<<",\"z\":"<<tr.position.z
               <<",\"sx\":"<<rend.sx<<",\"sy\":"<<rend.sy<<",\"sz\":"<<rend.sz
               <<",\"energy\":"<<energy<<",\"rssi\":"<<rssi<<",\"synthetic\":false"
               <<",\"color\":\""<<hex_color(rend.color)<<"\"}";
-        }); os<<"]}"; return os.str();
+        });
+        os<<"],\"bodies\":["; bool fb=true;
+        for(const auto& kv:bodies){ if(!fb) os<<','; fb=false;
+          const auto& st=kv.second; const auto& o=st.last;
+          os<<"{\"id\":\""<<json_escape(kv.first)<<"\",\"kind\":\""<<json_escape(o.body_type)
+            <<"\",\"packets\":"<<st.packet_count
+            <<",\"rssi\":"<<o.rssi_dbm
+            <<",\"energy\":"<<o.region("energy", o.region("csi_energy"))
+            <<",\"signal\":"<<o.region("signal")
+            <<",\"temperature\":"<<o.region("temperature")<<"}"; }
+        os<<"]}"; return os.str();
     },[&](std::string_view path){
         if(path.find("view=est")!=std::string_view::npos) est_mode.store(true);
         auto apply=[&](float dx,float dz){
@@ -126,7 +137,7 @@ int main(int argc,char** argv){
                 auto obs=parse_csi_line(*line); if(!obs.valid) continue;
                 if(obs.synthetic || obs.source_class==SourceClass::Synthetic) continue;
                 if(obs.body_id.rfind("synthetic",0)==0) continue;
-                csi_field.ingest(obs); upsert_sensor(world,sensors,obs); infer.push(obs);
+                csi_field.ingest(obs); upsert_sensor(world,sensors,obs); if(!obs.csi.empty()) infer.push(obs);
             }
         }
         { std::lock_guard<std::mutex> g(infer_mu); last_est=infer.estimate(); last_est.live = file_live; }
@@ -146,6 +157,7 @@ int main(int argc,char** argv){
             const bool live=pk>0 && !latest.synthetic;
             std::cout<<"[status] "<<(live?"LIVE":"WAIT")
                      <<"  packets="<<pk
+                     <<"  bodies="<<csi_field.body_count()
                      <<"  body="<<(latest.body_id.empty()?"-":latest.body_id)
                      <<(pk>last_pk?"  +":"")
                      <<"\n"<<std::flush;
@@ -159,8 +171,8 @@ int main(int argc,char** argv){
             } else if(name.value=="npc") tr.position.x=1.4f+std::sin(t*0.55f)*0.6f;
             else if(rend.kind=="sensor"){
                 auto bit=bodies.find(name.value);
-                float e=bit==bodies.end()?0.f:bit->second.last.region("csi_energy");
-                rend.sy=0.35f+e*1.8f; rend.color=0x2ee6a6u;
+                float e=0.f; if(bit!=bodies.end()){ e=bit->second.last.region("energy", bit->second.last.region("csi_energy", bit->second.last.region("signal"))); }
+                rend.sy=0.35f+e*1.8f; rend.color=body_color(bit==bodies.end()?"":bit->second.last.body_type, name.value);
             }
         });
         { auto tk=fsched.step(vox, 1.f/60.f); std::lock_guard<std::mutex> g(tick_mu); last_tick=std::move(tk);} world.tick(1.0/60.0); std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -168,6 +180,6 @@ int main(int argc,char** argv){
     hud.stop();
     const auto latest=csi_field.latest();
     const bool pass=csi_field.packet_count()>0 && !latest.synthetic;
-    std::cout<<(pass?"[LIVE] PASS":"[LIVE] WAIT")<<"  packets="<<csi_field.packet_count()<<"\n"<<url<<"\n";
+    std::cout<<(pass?"[LIVE] PASS":"[LIVE] WAIT")<<"  packets="<<csi_field.packet_count()<<"  bodies="<<csi_field.body_count()<<"\n"<<url<<"\n";
     return hud_ok?0:1;
 }
