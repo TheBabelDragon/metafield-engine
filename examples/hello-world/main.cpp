@@ -10,8 +10,7 @@ struct RigidBody {
 };
 struct Renderable { uint32_t mesh_id = 0; };
 int main() {
-    World world;
-    world.time().refresh_scarcity();
+    World world = World::create();
     world.fields().create<OpticalField>(1);
     world.fields().create<ThermalField>(2);
     world.fields().create<AcousticField>(3);
@@ -31,11 +30,12 @@ int main() {
     FieldSample thermal  = world.sample(FieldType::Thermal,  t->position);
     FieldSample acoustic = world.sample(FieldType::Acoustic, t->position);
     std::cout << "Optical intensity at player:  " << optical.intensity  << "\n";
-    std::cout << "Thermal value at player:      " << thermal.scalar     << " \xc2\xb0C\n";
+    std::cout << "Thermal value at player:      " << thermal.scalar     << " C\n";
     std::cout << "Acoustic intensity at player: " << acoustic.intensity << "\n";
     for (int i = 0; i < 5; ++i) world.tick(1.0 / 60.0);
     std::cout << "Simulation time: " << world.time().simulation_time << " s\n";
     std::cout << "Tick count:      " << world.time().tick_count      << "\n";
+    std::cout << "World tick:      " << world.clock().tick            << "\n";
     std::cout << "Clock:           " << world.time().scarcity.to_json() << "\n";
     std::cout << "Entities with Transform:\n";
     world.entities().each<Transform>([](EntityID id, Transform& tr) {
