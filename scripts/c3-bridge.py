@@ -65,25 +65,17 @@ def unfold(pkt: dict, via: str) -> List[dict]:
     out = []
     self_id = int(pkt.get("node_id") or 0)
     if self_id:
-        out.append(node_rec(
-            self_id, pkt, via=via,
-            coordinator=pkt.get("coordinator"),
-            tick=pkt.get("tick"),
-            phase=str(pkt.get("phase") or ""),
-        ))
+        out.append(node_rec(self_id, pkt, via=via, coordinator=pkt.get("coordinator"),
+                            tick=pkt.get("tick"), phase=str(pkt.get("phase") or "")))
     for nb in pkt.get("neighbors") or []:
         if not isinstance(nb, dict):
             continue
         nid = int(nb.get("node_id") or 0)
         if not nid or nid == self_id:
             continue
-        out.append(node_rec(
-            nid, nb, via=f"{via}/gossip",
-            coordinator=pkt.get("coordinator"),
-            tick=pkt.get("tick"),
-            rssi=nb.get("rssi"),
-            alive=bool(nb.get("alive", True)),
-        ))
+        out.append(node_rec(nid, nb, via=f"{via}/gossip", coordinator=pkt.get("coordinator"),
+                            tick=pkt.get("tick"), rssi=nb.get("rssi"),
+                            alive=bool(nb.get("alive", True))))
     return out
 
 
@@ -103,12 +95,11 @@ class TextAcc:
             self.tick = int(m.group(1))
         if m := KV_RE.search(line):
             self.fields[m.group(1)] = float(m.group(2))
-            if self.node_id and len(self.fields) >= 4:
-                rec = node_rec(
-                    self.node_id, dict(self.fields), via=via,
-                    coordinator=self.coordinator, tick=self.tick,
-                )
-                self.fields.clear()
+            if self.node_id and self.fields:
+                rec = node_rec(self.node_id, dict(self.fields), via=via,
+                               coordinator=self.coordinator, tick=self.tick)
+                if m.group(1) == "signal":
+                    self.fields.clear()
                 return [rec]
         return []
 
@@ -127,6 +118,21 @@ def parse_line(raw: str, via: str, acc: TextAcc) -> List[dict]:
     return []
 
 
+def open_port(serial_mod, path: str):
+    s = serial_mod.Serial(path, BAUD, timeout=0.05)
+    try:
+        s.dtr = True
+        s.rts = False
+    except Exception:
+        pass
+    try:
+        s.write(b"status\n")
+        s.flush()
+    except Exception:
+        pass
+    return s
+
+
 def main() -> int:
     os.makedirs(os.path.dirname(JSONL) or ".", exist_ok=True)
     open(JSONL, "a").close()
@@ -135,13 +141,14 @@ def main() -> int:
     accs: Dict[str, TextAcc] = {}
     seen = 0
     last_scan = 0.0
+    last_poke = 0.0
     last_report = time.time()
     last_id: Dict[int, float] = {}
 
     try:
         import serial  # type: ignore
     except ImportError:
-        print("[c3-bridge] pyserial missing — pip install pyserial", file=sys.stderr)
+        print("[c3-bridge] pyserial missing — pacman -S python-pyserial", file=sys.stderr)
         serial = None  # type: ignore
 
     with open(JSONL, "a", buffering=1) as out:
@@ -154,12 +161,18 @@ def main() -> int:
                         if p in serials:
                             continue
                         try:
-                            s = serial.Serial(p, BAUD, timeout=0.05)
-                            serials[p] = s
+                            serials[p] = open_port(serial, p)
                             accs[p] = TextAcc()
                             print(f"[c3-bridge] open {p}", flush=True)
                         except Exception as e:
                             print(f"[c3-bridge] skip {p}: {e}", flush=True)
+            if now - last_poke >= 2.0:
+                last_poke = now
+                for p, s in list(serials.items()):
+                    try:
+                        s.write(b"status\n")
+                    except Exception:
+                        pass
             records: List[dict] = []
             dead = []
             for p, s in list(serials.items()):
@@ -187,16 +200,9 @@ def main() -> int:
                 out.flush()
                 seen += 1
                 if seen == 1 or seen % 8 == 0:
-                    print(
-                        f"[c3-bridge] LIVE total={seen} node={rec.get('body_id')} "
-                        f"fleet={len(last_id)} via={rec.get('via')}",
-                        flush=True,
-                    )
+                    print(f"[c3-bridge] LIVE total={seen} node={rec.get('body_id')} fleet={len(last_id)} via={rec.get('via')}", flush=True)
             if seen == 0 and now - last_report >= 5:
-                print(
-                    f"[c3-bridge] WAIT  ports={list(serials) or ports() or ['none']}",
-                    flush=True,
-                )
+                print(f"[c3-bridge] WAIT  ports={list(serials) or ports() or ['none']}", flush=True)
                 last_report = now
             if not records:
                 time.sleep(0.02)
