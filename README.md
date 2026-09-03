@@ -1,10 +1,12 @@
 # MetaField Engine
 
-Cross-domain universe engine. World state first. Existing optical / echo / CSI / Aurora work plugs in later.
+Physical-field substrate first. Simulation is one consumer.
 
-**Kernel:** World is the only authority. Events in, ticks out, history is replayable. See `docs/FOUNDATION.md`.
+**Kernel:** World admits Observations. Events in, ticks out, history is replayable. A cell is an address. See `docs/FOUNDATION.md`.
 
-**Clock:** `btc_height` is the coarse epoch. Cumulative work is scarcity weight. Wall time is observed_at only. Bitcoin is one `ExternalClockAnchor`, not the kernel clock. Unanchored Worlds are valid. See `docs/SCARCITY_CLOCK.md`.
+**Provenance:** physical / derived / synthetic. Unlabeled is synthetic. Synthetic is rejected unless `METAFIELD_ALLOW_SYNTHETIC=1`.
+
+**Clock:** `btc_height` is the coarse epoch. Cumulative work is scarcity weight. Bitcoin is one `ExternalClockAnchor`.
 
 ## Arch Linux
 
@@ -14,32 +16,15 @@ git pull
 bash scripts/run-arch.sh
 ```
 
-Stale build folder (the old `No rule to make hello_view` error):
+The process prints `http://127.0.0.1:8765`. That HUD is a frontend. House/tree/player are interpretations, not kernel types.
 
-```bash
-cd metafield-engine/build
-cmake ..
-cmake --build . --target hello_view
-./hello_view
-```
+`jsonl [missing]` means no physical CSI yet. The HUD may still draw a labeled synthetic model. That model is not World-admitted field state.
 
-The process prints:
-
-```
-http://127.0.0.1:8765
-```
-
-That is HTTP on localhost. Open it. Ctrl+C stops.
-
-`jsonl [missing]` is normal until throne-room writes `/tmp/metafield/csi.jsonl`. The World still runs on a synthetic field.
-
-Optional Bitcoin tip (still not confirmed):
+Optional Bitcoin tip:
 
 ```bash
 export METAFIELD_BTC_HEIGHT=900001
 ```
-
-or drop `/tmp/metafield/btc_clock.json`.
 
 LIVE (optional other terminal):
 
@@ -48,7 +33,7 @@ mkdir -p /tmp/metafield
 python -m observer.metafield_bridge --udp --out /tmp/metafield/csi.jsonl
 ```
 
-Kernel check without the HUD:
+Kernel check:
 
 ```bash
 cmake -S . -B build && cmake --build build --target world_kernel_test && ./build/world_kernel_test
@@ -56,11 +41,10 @@ cmake -S . -B build && cmake --build build --target world_kernel_test && ./build
 
 ## What v0 includes
 
-- World kernel: Event → Systems → Tick → History → hash/replay
-- World + ECS + Time + Fields + scarcity clock as an external anchor
-- First universe: house, tree, light, player, NPC
-- CSI ingest (live JSONL or synthetic)
-- 3D HUD of World-owned entities
-- Player / NPC locomotion
+- Quantity + Provenance + Observation
+- World kernel: Event → Tick → History → hash/replay
+- Grid discretization (VoxelField) as one storage strategy
+- CSI ingest tagged physical vs synthetic
+- HUD frontend
 
-Not yet: Vulkan renderer, optical-body / echo-grid adapters, Aurora fabric.
+Not yet: adaptive meshes, hardware topology graphs, Vulkan, Aurora.

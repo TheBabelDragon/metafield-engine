@@ -9,6 +9,7 @@
 #include "engine/kernel/world_tick.hpp"
 #include "engine/kernel/world_state.hpp"
 #include "engine/kernel/world_history.hpp"
+#include "engine/kernel/observation.hpp"
 #include "engine/substrate/field.hpp"
 #include "engine/substrate/scheduler.hpp"
 
@@ -23,6 +24,7 @@ public:
         World w;
         w.world_id_ = id;
         w.clock_ = WorldClock::from_scarcity(resolve_clock());
+        w.allow_synthetic_ = synthetic_allowed();
         w.history_.genesis = w.capture_state();
         return w;
     }
@@ -46,6 +48,10 @@ public:
     SimulationVersion& version() { return version_; }
     const SimulationVersion& version() const { return version_; }
 
+    void allow_synthetic(bool on) { allow_synthetic_ = on; }
+    bool allows_synthetic() const { return allow_synthetic_; }
+    std::uint64_t rejected_events() const { return rejected_; }
+
     EntityID spawn() { return entities_.spawn(); }
     void destroy(EntityID id) { entities_.destroy(id); }
 
@@ -54,9 +60,32 @@ public:
         clock_.advance(dt_sim);
     }
 
-    void push_event(WorldEvent ev) {
+    bool push_event(WorldEvent ev) {
+        if (ev.provenance.cls == SourceClass::Unknown)
+            ev.provenance.cls = SourceClass::Synthetic;
+        if (ev.provenance.is_synthetic() && !allow_synthetic_) {
+            ++rejected_;
+            return false;
+        }
         ev.sequence = ++event_seq_;
         pending_.push_back(std::move(ev));
+        return true;
+    }
+
+    bool admit(const Observation& obs) {
+        if (!obs.admissible(allow_synthetic_)) {
+            ++rejected_;
+            return false;
+        }
+        WorldEvent ev;
+        ev.type = EventType::Observation;
+        ev.name = quantity_name(obs.quantity);
+        ev.channel = channel_for(obs.quantity);
+        ev.value = static_cast<float>(obs.value);
+        if (obs.where) ev.cell = *obs.where;
+        ev.provenance = obs.provenance;
+        ev.provenance.uncertainty = static_cast<float>(obs.uncertainty);
+        return push_event(std::move(ev));
     }
 
     WorldTick step(float dt) {
@@ -65,7 +94,7 @@ public:
         FieldDeltaList event_deltas;
         std::vector<EntityDelta> entity_deltas;
         for (const auto& ev : inputs) {
-            if (ev.type == EventType::Impulse) {
+            if (ev.type == EventType::Impulse || ev.type == EventType::Observation) {
                 const float old = substrate_.sample(ev.cell, ev.channel);
                 const float neu = old + ev.value;
                 substrate_.mark(ev.cell);
@@ -118,6 +147,8 @@ private:
     SimulationVersion version_;
     std::vector<WorldEvent> pending_;
     std::uint64_t event_seq_ = 0;
+    std::uint64_t rejected_ = 0;
+    bool allow_synthetic_ = false;
     WorldTick last_{};
 };
 
