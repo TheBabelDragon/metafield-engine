@@ -12,10 +12,6 @@
 
 namespace mf {
 
-// Wall time is never the World epoch.
-// btc_height is the coarse scarcity coordinate; work is weight; observed_at is informational.
-// Unanchored Worlds and packets remain valid.
-
 enum class ClockConfidence : uint8_t {
     None = 0,
     Included = 1,
@@ -56,11 +52,11 @@ struct ScarcityClock {
         std::ostringstream os;
         os << "{\"clock_version\":" << clock_version
            << ",\"epoch\":" << (btc_height ? std::to_string(*btc_height) : "null")
-           << ",\"btc_height\":" << (btc_height ? std::to_string(*btc_height) : "null")
-           << ",\"btc_block_hash\:";
+           << ",\"btc_height\":" << (btc_height ? std::to_string(*btc_height) : "null");
+        os << ",\"btc_block_hash\":";
         if (btc_block_hash.empty()) os << "null";
         else os << "\"" << btc_block_hash << "\"";
-        os << ",\"btc_work\:";
+        os << ",\"btc_work\":";
         if (btc_work.empty()) os << "null";
         else os << "\"" << btc_work << "\"";
         os << ",\"confidence\":\"" << clock_confidence_name(confidence) << "\""
