@@ -1,11 +1,10 @@
 #pragma once
 
 #include "engine/core/types.hpp"
+#include "engine/world/scarcity_clock.hpp"
 
-#include <cstdint>
 #include <string>
 #include <vector>
-#include <unordered_map>
 
 namespace mf {
 
@@ -19,6 +18,7 @@ struct FieldObservation {
     std::string body_id;
     std::string body_type = "wifi_csi";
     std::string timestamp;
+    ScarcityClock clock;
     std::vector<FieldRegion> regions;
     std::vector<float> csi;
     float rssi_dbm = -90.f;

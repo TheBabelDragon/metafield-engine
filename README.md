@@ -2,6 +2,8 @@
 
 Cross-domain universe engine. World state first. Existing optical / echo / CSI / Aurora work plugs in later.
 
+**Clock:** `btc_height` is the coarse epoch. Cumulative work is scarcity weight. Wall time is observed_at only. Unanchored Worlds are valid. See `docs/SCARCITY_CLOCK.md`.
+
 ## Arch Linux
 
 ```bash
@@ -29,6 +31,14 @@ That is HTTP on localhost. Open it. Ctrl+C stops.
 
 `jsonl [missing]` is normal until throne-room writes `/tmp/metafield/csi.jsonl`. The World still runs on a synthetic field.
 
+Optional Bitcoin tip (still not confirmed):
+
+```bash
+export METAFIELD_BTC_HEIGHT=900001
+```
+
+or drop `/tmp/metafield/btc_clock.json`.
+
 LIVE (optional other terminal):
 
 ```bash
@@ -38,7 +48,7 @@ python -m observer.metafield_bridge --udp --out /tmp/metafield/csi.jsonl
 
 ## What v0 includes
 
-- World + ECS + Time + Fields
+- World + ECS + Time + Fields + scarcity clock
 - First universe: house, tree, light, player, NPC
 - CSI ingest (live JSONL or synthetic)
 - 3D HUD of World-owned entities

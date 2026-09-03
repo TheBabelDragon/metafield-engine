@@ -39,11 +39,9 @@ void derive_regions(FieldObservation& o) {
             spread = std::sqrt(var / static_cast<float>(csi.size()));
         }
     }
-
     auto push = [&](const char* name, float value, float conf) {
         o.regions.push_back(FieldRegion{name, cl01(value), conf});
     };
-
     push("rssi",       rssi_norm(o.rssi_dbm), 1.00f);
     push("csi_mean",   mean,                  0.95f);
     push("csi_peak",   peak,                  0.95f);
@@ -79,6 +77,7 @@ FieldObservation parse_csi_line(std::string_view line) {
     } else if (auto tn = json_lite::get_number(line, "timestamp")) {
         o.timestamp = std::to_string(*tn);
     }
+    o.clock = parse_clock_json(line);
 
     if (auto rssi = json_lite::get_number(line, "rssi")) {
         o.rssi_dbm = static_cast<float>(*rssi);
