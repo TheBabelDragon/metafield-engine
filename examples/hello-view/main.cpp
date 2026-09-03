@@ -66,7 +66,7 @@ int main(int argc,char** argv){
         auto latest=csi_field.latest(); auto bodies=csi_field.bodies(); CsiEstimate est; {std::lock_guard<std::mutex> g(infer_mu); est=last_est;}
         std::ostringstream os;
         os<<"{\"packets\":"<<csi_field.packet_count()<<",\"sim_t\":"<<world.time().simulation_time
-          <<",\"view\":\""<<(est_mode.load()?"est":"live")<<"\""
+          <<",\"view\":\""<<(est_mode.load()?"est":"syn")<<"\""
           <<",\"live\":"<<(file_live?"true":"false")
           <<",\"jsonl_missing\":"<<(tail.file_exists()?"false":"true")
           <<",\"player_manual\":"<<(player_manual.load()?"true":"false")
@@ -105,6 +105,7 @@ int main(int argc,char** argv){
         os<<"]}"; return os.str();
     },[&](std::string_view path){
         if(path.find("view=est")!=std::string_view::npos) est_mode.store(true);
+        if(path.find("view=syn")!=std::string_view::npos) est_mode.store(false);
         auto apply=[&](float dx,float dz){
             player_manual.store(true);
             player_x.store(clampf(player_x.load()+dx,-3.2f,3.2f));
@@ -115,14 +116,14 @@ int main(int argc,char** argv){
         else if(path.find("move=left")!=std::string_view::npos) apply(-0.28f,0.f);
         else if(path.find("move=right")!=std::string_view::npos) apply(0.28f,0.f);
         std::ostringstream os;
-        os<<"{\"view\":\""<<(est_mode.load()?"est":"live")<<"\",\"player_manual\":"
+        os<<"{\"view\":\""<<(est_mode.load()?"est":"syn")<<"\",\"player_manual\":"
           <<(player_manual.load()?"true":"false")<<",\"x\":"<<player_x.load()<<",\"z\":"<<player_z.load()<<"}";
         return os.str();
     });
     const std::string url="http://127.0.0.1:"+std::to_string(port);
     std::cout<<"\n================================================\n MetaField Engine HUD\n "<<url<<(hud_ok?"\n":"  [bind failed]\n")<<"================================================\n";
     std::cout<<" jsonl : "<<path<<(tail.file_exists()?"  [present]\n":"  [missing]\n")
-             <<" mode  : LIVE ESP32 only (synthetic_cyd removed)\n"
+             <<" mode  : SYN world / EST tracks  (C3+CYD live bodies)\n"
              <<" keys  : arrows / WASD move player\n"
              <<" stop  : Ctrl+C\n\n";
     using clock=std::chrono::steady_clock; const auto start=clock::now();
@@ -145,7 +146,7 @@ int main(int argc,char** argv){
         const auto pk=csi_field.packet_count();
         if(pk>0 && !latest.synthetic && !announced_live){
             announced_live=true;
-            std::cout<<"[LIVE] PASS  real CSI  body="<<latest.body_id<<"  packets="<<pk<<"\n"<<std::flush;
+            std::cout<<"[LIVE] PASS  body="<<latest.body_id<<"  packets="<<pk<<"\n"<<std::flush;
         }
         if(player_manual.load() && !announced_player){
             announced_player=true;
@@ -157,10 +158,9 @@ int main(int argc,char** argv){
             const bool live=pk>0 && !latest.synthetic;
             std::cout<<"[status] "<<(live?"LIVE":"WAIT")
                      <<"  packets="<<pk
-                     <<"  bodies="<<csi_field.body_count()
-                     <<"  body="<<(latest.body_id.empty()?"-":latest.body_id)
-                     <<(pk>last_pk?"  +":"")
-                     <<"\n"<<std::flush;
+                     <<"  bodies="<<csi_field.body_count();
+            for(const auto& kv:csi_field.bodies()) std::cout<<" "<<kv.first;
+            std::cout<<(pk>last_pk?"  +":"")<<"\n"<<std::flush;
             last_pk=pk;
         }
         const float t=float(world.time().simulation_time); const auto bodies=csi_field.bodies();
