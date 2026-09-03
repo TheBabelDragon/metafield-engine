@@ -15,11 +15,14 @@ mkdir -p build
 cd build
 # Always reconfigure so new targets (hello_view) appear in stale build trees.
 cmake ..
-cmake --build . --target hello_world hello_csi hello_view -j"$(nproc)"
+cmake --build . --target hello_world hello_csi hello_view scarcity_clock_test -j"$(nproc)"
 
 echo
 echo "=== hello_world ==="
 ./hello_world
+echo
+echo "=== scarcity clock ==="
+./scarcity_clock_test
 echo
 echo "=== visual HUD ==="
 PORT=8765
