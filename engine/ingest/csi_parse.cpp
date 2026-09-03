@@ -49,6 +49,11 @@ void derive_regions(FieldObservation& o) {
     push("csi_spread", spread * 2.f,          0.85f);
 }
 
+void take_scalar(FieldObservation& o, std::string_view line, const char* key) {
+    if (auto v = json_lite::get_number(line, key))
+        o.regions.push_back(FieldRegion{key, static_cast<float>(*v), 1.f});
+}
+
 } // namespace
 
 FieldObservation parse_csi_line(std::string_view line) {
@@ -61,6 +66,7 @@ FieldObservation parse_csi_line(std::string_view line) {
     auto node = json_lite::get_string(line, "node");
     auto body = json_lite::get_string(line, "body_id");
     auto body_type = json_lite::get_string(line, "body_type");
+    const bool c3 = (type && *type == "c3_swarm") || (body_type && *body_type == "c3_swarm");
 
     const bool looks_wifi =
         (type && *type == "wifi_csi") ||
@@ -68,10 +74,10 @@ FieldObservation parse_csi_line(std::string_view line) {
         (body_type && *body_type == "wifi_csi") ||
         (line.find("\"field_regions\"") != std::string_view::npos && body);
 
-    if (!looks_wifi && !node && !body) return o;
+    if (!looks_wifi && !c3 && !node && !body) return o;
 
-    o.body_id = body ? *body : (node ? *node : "csi-unknown");
-    o.body_type = body_type ? *body_type : "wifi_csi";
+    o.body_id = body ? *body : (node ? *node : (c3 ? "c3-unknown" : "csi-unknown"));
+    o.body_type = body_type ? *body_type : (c3 ? "c3_swarm" : "wifi_csi");
     if (auto ts = json_lite::get_string(line, "timestamp")) {
         o.timestamp = *ts;
     } else if (auto tn = json_lite::get_number(line, "timestamp")) {
@@ -110,6 +116,13 @@ FieldObservation parse_csi_line(std::string_view line) {
             }
             pos = rkey + 8;
         }
+    }
+
+    if (c3) {
+        take_scalar(o, line, "temperature");
+        take_scalar(o, line, "information");
+        take_scalar(o, line, "energy");
+        take_scalar(o, line, "signal");
     }
 
     if (o.regions.empty()) {
