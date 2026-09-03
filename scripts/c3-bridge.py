@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Discover every USB ESP32-C3 from c3-field-swarm and unfold the fleet into jsonl."""
+"""Discover USB ESP32-C3 nodes from c3-field-swarm and unfold the fleet into jsonl."""
 from __future__ import annotations
 
 import glob
@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 JSONL = os.environ.get("METAFIELD_CSI_JSONL", "/tmp/metafield/csi.jsonl")
 BAUD = 115200
@@ -16,6 +16,8 @@ NODE_RE = re.compile(r"\[C3\]\s+node=(\d+)")
 KV_RE = re.compile(r"\[C3\]\s+(temperature|information|energy|signal)=([0-9.+-]+)")
 MEM_RE = re.compile(r"\[C3\]\s+members=(\d+)\s+coordinator=(\d+)")
 TICK_RE = re.compile(r"\[C3\]\s+tick=(\d+)")
+C3_HINT = re.compile(r"(\[C3\]|C3JSON|c3-field-swarm|PHASE_|coordinator:)")
+NOT_C3 = re.compile(r"(ECHO FIELD|wifi_csi|CSIJSON|Eg7)")
 
 
 def ports() -> List[str]:
@@ -29,10 +31,10 @@ def ports() -> List[str]:
 def node_rec(node_id: int, fields: dict, *, via: str, coordinator=None,
              tick=None, rssi=None, alive: bool = True, phase: str = "") -> dict:
     nid = f"c3-{int(node_id):02d}"
-    temp = float(fields.get("temperature", 0))
-    info = float(fields.get("information", 0))
-    energy = float(fields.get("energy", 0))
-    signal = float(fields.get("signal", 0))
+    temp = float(fields.get("temperature", 0) or 0)
+    info = float(fields.get("information", 0) or 0)
+    energy = float(fields.get("energy", 0) or 0)
+    signal = float(fields.get("signal", 0) or 0)
     return {
         "type": "c3_swarm",
         "source_class": "physical",
@@ -63,19 +65,32 @@ def node_rec(node_id: int, fields: dict, *, via: str, coordinator=None,
 
 def unfold(pkt: dict, via: str) -> List[dict]:
     out = []
+    seen = set()
     self_id = int(pkt.get("node_id") or 0)
     if self_id:
         out.append(node_rec(self_id, pkt, via=via, coordinator=pkt.get("coordinator"),
                             tick=pkt.get("tick"), phase=str(pkt.get("phase") or "")))
+        seen.add(self_id)
     for nb in pkt.get("neighbors") or []:
         if not isinstance(nb, dict):
             continue
         nid = int(nb.get("node_id") or 0)
-        if not nid or nid == self_id:
+        if not nid or nid in seen:
             continue
+        seen.add(nid)
         out.append(node_rec(nid, nb, via=f"{via}/gossip", coordinator=pkt.get("coordinator"),
                             tick=pkt.get("tick"), rssi=nb.get("rssi"),
                             alive=bool(nb.get("alive", True))))
+    for mid in pkt.get("members") or []:
+        try:
+            nid = int(mid)
+        except (TypeError, ValueError):
+            continue
+        if not nid or nid in seen:
+            continue
+        seen.add(nid)
+        out.append(node_rec(nid, {}, via=f"{via}/member", coordinator=pkt.get("coordinator"),
+                            tick=pkt.get("tick"), alive=True))
     return out
 
 
@@ -85,23 +100,23 @@ class TextAcc:
         self.fields: dict = {}
         self.coordinator = None
         self.tick = None
+        self.member_count = 0
 
     def feed(self, line: str, via: str) -> List[dict]:
+        out: List[dict] = []
         if m := NODE_RE.search(line):
             self.node_id = int(m.group(1))
         if m := MEM_RE.search(line):
+            self.member_count = int(m.group(1))
             self.coordinator = int(m.group(2))
         if m := TICK_RE.search(line):
             self.tick = int(m.group(1))
         if m := KV_RE.search(line):
             self.fields[m.group(1)] = float(m.group(2))
-            if self.node_id and self.fields:
-                rec = node_rec(self.node_id, dict(self.fields), via=via,
-                               coordinator=self.coordinator, tick=self.tick)
-                if m.group(1) == "signal":
-                    self.fields.clear()
-                return [rec]
-        return []
+            if self.node_id:
+                out.append(node_rec(self.node_id, dict(self.fields), via=via,
+                                    coordinator=self.coordinator, tick=self.tick))
+        return out
 
 
 def parse_line(raw: str, via: str, acc: TextAcc) -> List[dict]:
@@ -113,24 +128,38 @@ def parse_line(raw: str, via: str, acc: TextAcc) -> List[dict]:
             return []
         if isinstance(pkt, dict) and pkt.get("type") == "c3_swarm":
             return unfold(pkt, via)
-    if raw.startswith("[C3]"):
+    if raw.startswith("[C3]") or raw.startswith("coordinator:"):
         return acc.feed(raw, via)
     return []
 
 
 def open_port(serial_mod, path: str):
-    s = serial_mod.Serial(path, BAUD, timeout=0.05)
+    # C3 USB-CDC: DTR/RTS high resets the chip. Leave both low.
+    s = serial_mod.Serial()
+    s.port = path
+    s.baudrate = BAUD
+    s.timeout = 0.05
+    s.dsrdtr = False
+    s.rtscts = False
+    s.dtr = False
+    s.rts = False
+    s.open()
+    time.sleep(0.05)
     try:
-        s.dtr = True
-        s.rts = False
-    except Exception:
-        pass
-    try:
+        s.reset_input_buffer()
         s.write(b"status\n")
         s.flush()
     except Exception:
         pass
     return s
+
+
+def classify_line(raw: str) -> Optional[str]:
+    if NOT_C3.search(raw):
+        return "other"
+    if C3_HINT.search(raw):
+        return "c3"
+    return None
 
 
 def main() -> int:
@@ -139,6 +168,8 @@ def main() -> int:
     print(f"[c3-bridge] jsonl={JSONL}", flush=True)
     serials: Dict[str, object] = {}
     accs: Dict[str, TextAcc] = {}
+    kind: Dict[str, str] = {}
+    skip: Dict[str, float] = {}
     seen = 0
     last_scan = 0.0
     last_poke = 0.0
@@ -148,7 +179,7 @@ def main() -> int:
     try:
         import serial  # type: ignore
     except ImportError:
-        print("[c3-bridge] pyserial missing — pacman -S python-pyserial", file=sys.stderr)
+        print("[c3-bridge] pyserial missing — sudo pacman -S --needed python-pyserial", file=sys.stderr)
         serial = None  # type: ignore
 
     with open(JSONL, "a", buffering=1) as out:
@@ -158,17 +189,21 @@ def main() -> int:
                 last_scan = now
                 if serial is not None:
                     for p in ports():
-                        if p in serials:
+                        if p in serials or (p in skip and now < skip[p]):
                             continue
                         try:
                             serials[p] = open_port(serial, p)
                             accs[p] = TextAcc()
-                            print(f"[c3-bridge] open {p}", flush=True)
+                            kind[p] = "probe"
+                            print(f"[c3-bridge] open {p} (no DTR reset)", flush=True)
                         except Exception as e:
                             print(f"[c3-bridge] skip {p}: {e}", flush=True)
+                            skip[p] = now + 4.0
             if now - last_poke >= 2.0:
                 last_poke = now
                 for p, s in list(serials.items()):
+                    if kind.get(p) == "other":
+                        continue
                     try:
                         s.write(b"status\n")
                     except Exception:
@@ -181,7 +216,19 @@ def main() -> int:
                 except Exception:
                     dead.append(p)
                     continue
-                records.extend(parse_line(raw, p, accs[p]))
+                if raw.strip():
+                    tag = classify_line(raw)
+                    if tag == "other" and kind.get(p) != "c3":
+                        kind[p] = "other"
+                        print(f"[c3-bridge] {p} is not a C3 node, ignoring", flush=True)
+                        continue
+                    if tag == "c3":
+                        kind[p] = "c3"
+                    if kind.get(p) != "other":
+                        recs = parse_line(raw, p, accs[p])
+                        if recs:
+                            kind[p] = "c3"
+                        records.extend(recs)
             for p in dead:
                 try:
                     serials[p].close()
@@ -189,6 +236,7 @@ def main() -> int:
                     pass
                 serials.pop(p, None)
                 accs.pop(p, None)
+                kind.pop(p, None)
                 print(f"[c3-bridge] drop {p}", flush=True)
             for rec in records:
                 nid = int(rec.get("node_id") or 0)
@@ -200,9 +248,16 @@ def main() -> int:
                 out.flush()
                 seen += 1
                 if seen == 1 or seen % 8 == 0:
-                    print(f"[c3-bridge] LIVE total={seen} node={rec.get('body_id')} fleet={len(last_id)} via={rec.get('via')}", flush=True)
+                    print(
+                        f"[c3-bridge] LIVE total={seen} node={rec.get('body_id')} "
+                        f"fleet={sorted(last_id)} via={rec.get('via')}",
+                        flush=True,
+                    )
             if seen == 0 and now - last_report >= 5:
-                print(f"[c3-bridge] WAIT  ports={list(serials) or ports() or ['none']}", flush=True)
+                print(
+                    f"[c3-bridge] WAIT  ports={list(serials) or ports() or ['none']} kind={kind}",
+                    flush=True,
+                )
                 last_report = now
             if not records:
                 time.sleep(0.02)
