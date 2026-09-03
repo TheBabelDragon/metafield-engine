@@ -33,6 +33,7 @@ public:
     }
     void apply(const FieldDeltaList& deltas) {
         for (const auto& d : deltas.items()) {
+            mark(d.cell);
             CellState* cell = get(d.cell);
             if (cell) cell->set(d.channel, d.new_value);
         }

@@ -2,7 +2,9 @@
 
 Cross-domain universe engine. World state first. Existing optical / echo / CSI / Aurora work plugs in later.
 
-**Clock:** `btc_height` is the coarse epoch. Cumulative work is scarcity weight. Wall time is observed_at only. Unanchored Worlds are valid. See `docs/SCARCITY_CLOCK.md`.
+**Kernel:** World is the only authority. Events in, ticks out, history is replayable. See `docs/FOUNDATION.md`.
+
+**Clock:** `btc_height` is the coarse epoch. Cumulative work is scarcity weight. Wall time is observed_at only. Bitcoin is one `ExternalClockAnchor`, not the kernel clock. Unanchored Worlds are valid. See `docs/SCARCITY_CLOCK.md`.
 
 ## Arch Linux
 
@@ -46,9 +48,16 @@ mkdir -p /tmp/metafield
 python -m observer.metafield_bridge --udp --out /tmp/metafield/csi.jsonl
 ```
 
+Kernel check without the HUD:
+
+```bash
+cmake -S . -B build && cmake --build build --target world_kernel_test && ./build/world_kernel_test
+```
+
 ## What v0 includes
 
-- World + ECS + Time + Fields + scarcity clock
+- World kernel: Event → Systems → Tick → History → hash/replay
+- World + ECS + Time + Fields + scarcity clock as an external anchor
 - First universe: house, tree, light, player, NPC
 - CSI ingest (live JSONL or synthetic)
 - 3D HUD of World-owned entities
