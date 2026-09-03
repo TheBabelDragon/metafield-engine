@@ -1,50 +1,34 @@
 # MetaField Engine
 
-Physical-field substrate first. Simulation is one consumer.
+Physical-field substrate first. Simulation is one consumer. Hardware is required.
 
-**Kernel:** World admits Observations. Events in, ticks out, history is replayable. A cell is an address. See `docs/FOUNDATION.md`.
+**Kernel:** World admits Observations. A cell is an address. See `docs/FOUNDATION.md`.
 
-**Provenance:** physical / derived / synthetic. Unlabeled is synthetic. Synthetic is rejected unless `METAFIELD_ALLOW_SYNTHETIC=1`.
-
-**Clock:** `btc_height` is the coarse epoch. Cumulative work is scarcity weight. Bitcoin is one `ExternalClockAnchor`.
-
-## Arch Linux
+**Hardware:** live ESP32 CSI (wifi-sensing-system / CYD) or optical-body-s3. `synthetic_cyd` is gone. `--synth` exits.
 
 ```bash
-cd metafield-engine
-git pull
-bash scripts/run-arch.sh
+# 1. Flash a node
+cd wifi-sensing-system/esp32 && ./flash.sh --cyd -p /dev/ttyACM0 -e --monitor
+
+# 2. Bridge UDP 4210 -> jsonl
+python3 metafield-engine/scripts/csi-bridge.py
+
+# 3. Engine
+cd metafield-engine && git pull && bash scripts/run-arch.sh
 ```
 
-The process prints `http://127.0.0.1:8765`. That HUD is a frontend. House/tree/player are interpretations, not kernel types.
+HUD prints `http://127.0.0.1:8765`. Badge stays WAIT until a physical packet arrives.
 
-`jsonl [missing]` means no physical CSI yet. The HUD may still draw a labeled synthetic model. That model is not World-admitted field state.
-
-Optional Bitcoin tip:
+Optional optical body:
 
 ```bash
-export METAFIELD_BTC_HEIGHT=900001
+cd optical-body-s3 && pio run -t upload && pio device monitor
 ```
 
-LIVE (optional other terminal):
+Optional Bitcoin tip: `export METAFIELD_BTC_HEIGHT=900001`
 
-```bash
-mkdir -p /tmp/metafield
-python -m observer.metafield_bridge --udp --out /tmp/metafield/csi.jsonl
-```
-
-Kernel check:
+Kernel check (no CSI needed):
 
 ```bash
 cmake -S . -B build && cmake --build build --target world_kernel_test && ./build/world_kernel_test
 ```
-
-## What v0 includes
-
-- Quantity + Provenance + Observation
-- World kernel: Event → Tick → History → hash/replay
-- Grid discretization (VoxelField) as one storage strategy
-- CSI ingest tagged physical vs synthetic
-- HUD frontend
-
-Not yet: adaptive meshes, hardware topology graphs, Vulkan, Aurora.

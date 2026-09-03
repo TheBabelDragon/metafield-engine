@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Hands-free Arch Linux entry point for metafield-engine.
+# Hardware required: ESP32 CSI node writing /tmp/metafield/csi.jsonl.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,7 +14,6 @@ fi
 
 mkdir -p build
 cd build
-# Always reconfigure so new targets appear in stale build trees.
 cmake ..
 cmake --build . --target hello_world hello_csi hello_view scarcity_clock_test world_kernel_test -j"$(nproc)"
 
@@ -27,13 +27,16 @@ echo
 echo "=== scarcity clock ==="
 ./scarcity_clock_test
 echo
-echo "=== visual HUD ==="
+echo "=== visual HUD (live ESP32 only) ==="
 PORT=8765
 URL="http://127.0.0.1:${PORT}"
 echo
 echo "  HUD  ${URL}"
 echo
-echo "If /tmp/metafield/csi.jsonl exists it is followed; otherwise synthetic."
+echo "synthetic_cyd is gone. Need a physical node:"
+echo "  1. Flash wifi-sensing-system ESP32 or CYD"
+echo "  2. python3 ../scripts/csi-bridge.py     # UDP 4210 -> /tmp/metafield/csi.jsonl"
+echo "Optical body: flash optical-body-s3 (real ADS1115, no fake ADC)."
 echo "Ctrl+C stops the view."
 echo
 
