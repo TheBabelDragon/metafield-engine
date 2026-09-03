@@ -20,6 +20,9 @@ echo
 echo
 ./build/world_kernel_test
 echo
+echo "serial ports:"
+ls -l /dev/ttyACM* /dev/ttyUSB* 2>/dev/null || echo "  none — plug a C3 USB for C3 bodies"
+echo
 BRIDGE_PID=""; C3_PID=""; VIEW_PID=""
 cleanup() {
   [[ -n "$VIEW_PID" ]] && kill "$VIEW_PID" 2>/dev/null || true
