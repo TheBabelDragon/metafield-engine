@@ -1,4 +1,4 @@
-// hello-view — live CSI + FieldTick + arrow-key player
+// hello-view — live ESP32 CSI + FieldTick + arrow-key player
 #include "engine/world/world.hpp"
 #include "engine/world/demo_universe.hpp"
 #include "engine/ecs/components.hpp"
@@ -6,7 +6,6 @@
 #include "engine/fields/csi_infer.hpp"
 #include "engine/ingest/csi_parse.hpp"
 #include "engine/ingest/jsonl_tail.hpp"
-#include "engine/ingest/synthetic_csi.hpp"
 #include "engine/renderer/hud_server.hpp"
 #include "engine/substrate/scheduler.hpp"
 #include "engine/substrate/tick_json.hpp"
@@ -35,23 +34,22 @@ static EntityID upsert_sensor(World& world,std::unordered_map<std::string,Entity
     EntityID id=world.spawn();
     world.entities().add<Name>(id,Name{obs.body_id});
     world.entities().add<Transform>(id,Transform{sensor_pos(obs.body_id)});
-    world.entities().add<Renderable>(id,Renderable{"sensor",0.32f,0.6f,0.32f,obs.synthetic?0xc9842au:0x2ee6a6u});
+    world.entities().add<Renderable>(id,Renderable{"sensor",0.32f,0.6f,0.32f,0x2ee6a6u});
     world.entities().add<SensorTag>(id,SensorTag{obs.body_id});
     sensors[obs.body_id]=id; return id;
 }
 static float clampf(float v,float lo,float hi){ return v<lo?lo:(v>hi?hi:v); }
 int main(int argc,char** argv){
     std::signal(SIGINT,on_sig); std::signal(SIGTERM,on_sig);
-    std::string path=default_jsonl(); bool force_synth=false; bool live_only=false; int seconds=0, port=8765;
+    std::string path=default_jsonl(); int seconds=0, port=8765;
     for(int i=1;i<argc;++i){ std::string a=argv[i];
-        if(a=="--synth") force_synth=true;
-        else if(a=="--live") live_only=true;
+        if(a=="--synth"){ std::cerr<<"--synth removed. Flash a real ESP32 CSI node.\n"; return 2; }
         else if(a=="--file"&&i+1<argc) path=argv[++i];
         else if(a=="--seconds"&&i+1<argc) seconds=std::atoi(argv[++i]);
         else if(a=="--port"&&i+1<argc) port=std::atoi(argv[++i]);
     }
     World world; auto& csi_field=seed_demo_universe(world);
-    JsonlTail tail(path,true); bool file_live=!force_synth&&tail.file_exists();
+    JsonlTail tail(path,true); bool file_live=tail.file_exists();
     std::unordered_map<std::string,EntityID> sensors; CsiInferencer infer; std::mutex infer_mu; CsiEstimate last_est; std::atomic<bool> est_mode{false};
     std::atomic<bool> player_manual{false};
     std::atomic<float> player_x{0.f}, player_z{2.2f};
@@ -67,12 +65,12 @@ int main(int argc,char** argv){
         auto latest=csi_field.latest(); auto bodies=csi_field.bodies(); CsiEstimate est; {std::lock_guard<std::mutex> g(infer_mu); est=last_est;}
         std::ostringstream os;
         os<<"{\"packets\":"<<csi_field.packet_count()<<",\"sim_t\":"<<world.time().simulation_time
-          <<",\"view\":\""<<(est_mode.load()?"est":"syn")<<"\""
+          <<",\"view\":\""<<(est_mode.load()?"est":"live")<<"\""
           <<",\"live\":"<<(file_live?"true":"false")
           <<",\"jsonl_missing\":"<<(tail.file_exists()?"false":"true")
           <<",\"player_manual\":"<<(player_manual.load()?"true":"false")
           <<",\"entities\":"<<world.entities().living_count()
-          <<",\"latest\":{\"body_id\":\""<<json_escape(latest.body_id)<<"\",\"synthetic\":"<<(latest.synthetic?"true":"false")
+          <<",\"latest\":{\"body_id\":\""<<json_escape(latest.body_id)<<"\",\"synthetic\":false"
           <<",\"rssi\":"<<latest.region("rssi")<<",\"energy\":"<<latest.region("csi_energy")
           <<",\"spread\":"<<latest.region("csi_spread")<<",\"csi\":"<<farr(latest.csi)
           <<"},\"estimate\":{\"live\":"<<(est.live?"true":"false")<<",\"motion\":"<<est.motion
@@ -86,17 +84,16 @@ int main(int argc,char** argv){
         os<<"]},\"tick\":"<<tick_to_json(tk);
         os<<",\"world\":["; bool first=true;
         world.entities().each<Name,Transform,Renderable>([&](EntityID id,Name& name,Transform& tr,Renderable& rend){
-            if(!first) { os<<','; } first=false; float energy=0,rssi=0; bool syn=false;
-            if(rend.kind=="sensor"){ auto bit=bodies.find(name.value); if(bit!=bodies.end()){ energy=bit->second.last.region("csi_energy"); rssi=bit->second.last.region("rssi"); syn=bit->second.last.synthetic; } }
+            if(!first) { os<<','; } first=false; float energy=0,rssi=0;
+            if(rend.kind=="sensor"){ auto bit=bodies.find(name.value); if(bit!=bodies.end()){ energy=bit->second.last.region("csi_energy"); rssi=bit->second.last.region("rssi"); } }
             os<<"{\"id\":"<<id<<",\"name\":\""<<json_escape(name.value)<<"\",\"kind\":\""<<json_escape(rend.kind)<<"\""
               <<",\"x\":"<<tr.position.x<<",\"y\":"<<tr.position.y<<",\"z\":"<<tr.position.z
               <<",\"sx\":"<<rend.sx<<",\"sy\":"<<rend.sy<<",\"sz\":"<<rend.sz
-              <<",\"energy\":"<<energy<<",\"rssi\":"<<rssi<<",\"synthetic\":"<<(syn?"true":"false")
+              <<",\"energy\":"<<energy<<",\"rssi\":"<<rssi<<",\"synthetic\":false"
               <<",\"color\":\""<<hex_color(rend.color)<<"\"}";
         }); os<<"]}"; return os.str();
     },[&](std::string_view path){
         if(path.find("view=est")!=std::string_view::npos) est_mode.store(true);
-        if(path.find("view=syn")!=std::string_view::npos) est_mode.store(false);
         auto apply=[&](float dx,float dz){
             player_manual.store(true);
             player_x.store(clampf(player_x.load()+dx,-3.2f,3.2f));
@@ -107,40 +104,32 @@ int main(int argc,char** argv){
         else if(path.find("move=left")!=std::string_view::npos) apply(-0.28f,0.f);
         else if(path.find("move=right")!=std::string_view::npos) apply(0.28f,0.f);
         std::ostringstream os;
-        os<<"{\"view\":\""<<(est_mode.load()?"est":"syn")<<"\",\"player_manual\":"
+        os<<"{\"view\":\""<<(est_mode.load()?"est":"live")<<"\",\"player_manual\":"
           <<(player_manual.load()?"true":"false")<<",\"x\":"<<player_x.load()<<",\"z\":"<<player_z.load()<<"}";
         return os.str();
     });
     const std::string url="http://127.0.0.1:"+std::to_string(port);
     std::cout<<"\n================================================\n MetaField Engine HUD\n "<<url<<(hud_ok?"\n":"  [bind failed]\n")<<"================================================\n";
     std::cout<<" jsonl : "<<path<<(tail.file_exists()?"  [present]\n":"  [missing]\n")
-             <<" mode  : "<<(live_only?"LIVE-ONLY (no synthetic)\n":"auto (file or synthetic)\n")
-             <<" keys  : arrows / WASD move player (click the HUD first)\n"
-             <<" test  : watch this terminal for [LIVE] PASS  and the HUD badge\n"
+             <<" mode  : LIVE ESP32 only (synthetic_cyd removed)\n"
+             <<" keys  : arrows / WASD move player\n"
              <<" stop  : Ctrl+C\n\n";
     using clock=std::chrono::steady_clock; const auto start=clock::now();
-    auto next_synth=start; auto next_status=start;
-    std::uint64_t synth_tick=0, last_pk=0; bool announced_live=false, announced_player=false;
+    auto next_status=start;
+    std::uint64_t last_pk=0; bool announced_live=false, announced_player=false;
     while(g_run){
         if(seconds>0 && std::chrono::duration_cast<std::chrono::seconds>(clock::now()-start).count()>=seconds) break;
-        if(!force_synth && !file_live && tail.file_exists()){ file_live=true; std::cout<<"[ingest] jsonl ready\n"; }
+        if(!file_live && tail.file_exists()) file_live=true;
         if(file_live){
             for(int n=0;n<64;++n){
                 auto line=tail.poll(); if(!line) break;
                 auto obs=parse_csi_line(*line); if(!obs.valid) continue;
-                obs.synthetic=false;
-                if(line->find("\"synthetic\":true")!=std::string::npos) obs.synthetic=true;
+                if(obs.synthetic || obs.source_class==SourceClass::Synthetic) continue;
+                if(obs.body_id.rfind("synthetic",0)==0) continue;
                 csi_field.ingest(obs); upsert_sensor(world,sensors,obs); infer.push(obs);
-            }
-        } else if(!live_only) {
-            auto now=clock::now();
-            if(now>=next_synth){
-                auto obs=make_synthetic_csi(synth_tick++);
-                csi_field.ingest(obs); upsert_sensor(world,sensors,obs); infer.push(obs);
-                next_synth=now+std::chrono::milliseconds(80);
             }
         }
-        { std::lock_guard<std::mutex> g(infer_mu); last_est=infer.estimate(); last_est.live = file_live && !force_synth; }
+        { std::lock_guard<std::mutex> g(infer_mu); last_est=infer.estimate(); last_est.live = file_live; }
         const auto latest=csi_field.latest();
         const auto pk=csi_field.packet_count();
         if(pk>0 && !latest.synthetic && !announced_live){
@@ -155,10 +144,9 @@ int main(int argc,char** argv){
         if(now>=next_status){
             next_status=now+std::chrono::seconds(2);
             const bool live=pk>0 && !latest.synthetic;
-            std::cout<<"[status] "<<(live?"LIVE":(live_only?"WAIT":"SYN"))
+            std::cout<<"[status] "<<(live?"LIVE":"WAIT")
                      <<"  packets="<<pk
                      <<"  body="<<(latest.body_id.empty()?"-":latest.body_id)
-                     <<"  synthetic="<<(latest.synthetic?"yes":"no")
                      <<(pk>last_pk?"  +":"")
                      <<"\n"<<std::flush;
             last_pk=pk;
@@ -172,8 +160,7 @@ int main(int argc,char** argv){
             else if(rend.kind=="sensor"){
                 auto bit=bodies.find(name.value);
                 float e=bit==bodies.end()?0.f:bit->second.last.region("csi_energy");
-                bool syn=bit!=bodies.end()&&bit->second.last.synthetic;
-                rend.sy=0.35f+e*1.8f; rend.color=syn?0xc9842au:0x2ee6a6u;
+                rend.sy=0.35f+e*1.8f; rend.color=0x2ee6a6u;
             }
         });
         { auto tk=fsched.step(vox, 1.f/60.f); std::lock_guard<std::mutex> g(tick_mu); last_tick=std::move(tk);} world.tick(1.0/60.0); std::this_thread::sleep_for(std::chrono::milliseconds(5));
