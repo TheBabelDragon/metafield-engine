@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""Discover every USB ESP32-C3 from c3-field-swarm and unfold the fleet into jsonl.
-
-Opens all /dev/ttyACM* and /dev/ttyUSB* that speak [C3] or C3JSON.
-One coordinator USB is enough: neighbor FieldState is in the JSON snapshot.
-Multiple cables are merged and deduped by node_id.
-"""
+"""Discover every USB ESP32-C3 from c3-field-swarm and unfold the fleet into jsonl."""
 from __future__ import annotations
 
 import glob
 import json
 import os
+import re
 import sys
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 JSONL = os.environ.get("METAFIELD_CSI_JSONL", "/tmp/metafield/csi.jsonl")
 BAUD = 115200
+NODE_RE = re.compile(r"\[C3\]\s+node=(\d+)")
+KV_RE = re.compile(r"\[C3\]\s+(temperature|information|energy|signal)=([0-9.+-]+)")
+MEM_RE = re.compile(r"\[C3\]\s+members=(\d+)\s+coordinator=(\d+)")
+TICK_RE = re.compile(r"\[C3\]\s+tick=(\d+)")
 
 
 def ports() -> List[str]:
     extra = os.environ.get("METAFIELD_C3_SERIAL", "")
-    found = sorted(set(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyUSB*")))
+    found = sorted(set(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")))
     if extra:
-        found = list(dict.fromkeys(extra.split(",") + found))
+        found = list(dict.fromkeys([x for x in extra.split(",") if x] + found))
     return [p for p in found if os.path.exists(p)]
 
 
-def node_rec(node_id: int, fields: dict, *, via: str, coordinator: Optional[int] = None,
+def node_rec(node_id: int, fields: dict, *, via: str, coordinator=None,
              tick=None, rssi=None, alive: bool = True, phase: str = "") -> dict:
     nid = f"c3-{int(node_id):02d}"
     temp = float(fields.get("temperature", 0))
@@ -87,7 +87,33 @@ def unfold(pkt: dict, via: str) -> List[dict]:
     return out
 
 
-def parse_line(raw: str, via: str) -> List[dict]:
+class TextAcc:
+    def __init__(self) -> None:
+        self.node_id = 0
+        self.fields: dict = {}
+        self.coordinator = None
+        self.tick = None
+
+    def feed(self, line: str, via: str) -> List[dict]:
+        if m := NODE_RE.search(line):
+            self.node_id = int(m.group(1))
+        if m := MEM_RE.search(line):
+            self.coordinator = int(m.group(2))
+        if m := TICK_RE.search(line):
+            self.tick = int(m.group(1))
+        if m := KV_RE.search(line):
+            self.fields[m.group(1)] = float(m.group(2))
+            if self.node_id and len(self.fields) >= 4:
+                rec = node_rec(
+                    self.node_id, dict(self.fields), via=via,
+                    coordinator=self.coordinator, tick=self.tick,
+                )
+                self.fields.clear()
+                return [rec]
+        return []
+
+
+def parse_line(raw: str, via: str, acc: TextAcc) -> List[dict]:
     raw = raw.strip()
     if raw.startswith("C3JSON "):
         try:
@@ -96,6 +122,8 @@ def parse_line(raw: str, via: str) -> List[dict]:
             return []
         if isinstance(pkt, dict) and pkt.get("type") == "c3_swarm":
             return unfold(pkt, via)
+    if raw.startswith("[C3]"):
+        return acc.feed(raw, via)
     return []
 
 
@@ -104,6 +132,7 @@ def main() -> int:
     open(JSONL, "a").close()
     print(f"[c3-bridge] jsonl={JSONL}", flush=True)
     serials: Dict[str, object] = {}
+    accs: Dict[str, TextAcc] = {}
     seen = 0
     last_scan = 0.0
     last_report = time.time()
@@ -127,24 +156,26 @@ def main() -> int:
                         try:
                             s = serial.Serial(p, BAUD, timeout=0.05)
                             serials[p] = s
+                            accs[p] = TextAcc()
                             print(f"[c3-bridge] open {p}", flush=True)
                         except Exception as e:
                             print(f"[c3-bridge] skip {p}: {e}", flush=True)
             records: List[dict] = []
             dead = []
-            for p, s in serials.items():
+            for p, s in list(serials.items()):
                 try:
                     raw = s.readline().decode("utf-8", errors="ignore")
                 except Exception:
                     dead.append(p)
                     continue
-                records.extend(parse_line(raw, p))
+                records.extend(parse_line(raw, p, accs[p]))
             for p in dead:
                 try:
                     serials[p].close()
                 except Exception:
                     pass
                 serials.pop(p, None)
+                accs.pop(p, None)
                 print(f"[c3-bridge] drop {p}", flush=True)
             for rec in records:
                 nid = int(rec.get("node_id") or 0)
