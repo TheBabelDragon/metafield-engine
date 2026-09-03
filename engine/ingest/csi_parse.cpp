@@ -78,6 +78,12 @@ FieldObservation parse_csi_line(std::string_view line) {
         o.timestamp = std::to_string(*tn);
     }
     o.clock = parse_clock_json(line);
+    if (auto sc = json_lite::get_string(line, "source_class"))
+        o.source_class = source_class_from(*sc);
+    else if (auto src = json_lite::get_string(line, "source"))
+        o.source_class = source_class_from(*src);
+    if (auto inst = json_lite::get_string(line, "instrument")) o.instrument = *inst;
+    if (line.find("\"synthetic\":true") != std::string_view::npos) o.synthetic = true;
 
     if (auto rssi = json_lite::get_number(line, "rssi")) {
         o.rssi_dbm = static_cast<float>(*rssi);
@@ -111,6 +117,9 @@ FieldObservation parse_csi_line(std::string_view line) {
     }
 
     o.valid = !o.body_id.empty();
+    if (o.source_class == SourceClass::Synthetic) o.synthetic = true;
+    if (o.source_class == SourceClass::Unknown)
+        o.source_class = o.synthetic ? SourceClass::Synthetic : SourceClass::Physical;
     return o;
 }
 
