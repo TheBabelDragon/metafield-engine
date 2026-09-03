@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build + listen for a real CYD/ESP32 + HUD.
+# Build + listen for live CYD CSI and C3 swarm nodes + HUD.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -20,26 +20,27 @@ echo
 echo
 ./build/world_kernel_test
 echo
-BRIDGE_PID=""; VIEW_PID=""
-cleanup() { [[ -n "$VIEW_PID" ]] && kill "$VIEW_PID" 2>/dev/null || true; [[ -n "$BRIDGE_PID" ]] && kill "$BRIDGE_PID" 2>/dev/null || true; }
+BRIDGE_PID=""; C3_PID=""; VIEW_PID=""
+cleanup() {
+  [[ -n "$VIEW_PID" ]] && kill "$VIEW_PID" 2>/dev/null || true
+  [[ -n "$BRIDGE_PID" ]] && kill "$BRIDGE_PID" 2>/dev/null || true
+  [[ -n "$C3_PID" ]] && kill "$C3_PID" 2>/dev/null || true
+}
 trap cleanup EXIT INT TERM
 SERIAL_ARGS=()
 if [[ -n "${METAFIELD_CSI_SERIAL:-}" ]]; then SERIAL_ARGS+=(--serial "$METAFIELD_CSI_SERIAL"); fi
 python3 "$ROOT/scripts/csi-bridge.py" --port "$CSI_PORT" --out "$JSONL" "${SERIAL_ARGS[@]+"${SERIAL_ARGS[@]}"}" &
 BRIDGE_PID=$!
+python3 "$ROOT/scripts/c3-bridge.py" &
+C3_PID=$!
 sleep 0.3
-if ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
-  echo "csi-bridge died — UDP $CSI_PORT is probably taken."
-  echo "If dashboard.py --csi is running, it must write $JSONL (updated dashboard does)."
-fi
 echo
 echo "================================================"
-echo " LIVE CYD + HUD"
+echo " LIVE CYD + C3 SWARM + HUD"
 echo "  HUD     http://127.0.0.1:${PORT}"
 echo "  jsonl   ${JSONL}"
-echo "  UDP     0.0.0.0:${CSI_PORT}"
-echo "  host    announces on UDP ${CSI_PORT%*}4211"
-echo "  serial  ${METAFIELD_CSI_SERIAL:-none}"
+echo "  UDP     0.0.0.0:${CSI_PORT}   (CYD CSI)"
+echo "  serial  C3 /dev/ttyACM* /dev/ttyUSB*"
 echo "================================================"
 echo
 "$ROOT/build/hello_view" --file "$JSONL" --port "$PORT" &
