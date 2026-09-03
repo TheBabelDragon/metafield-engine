@@ -1,37 +1,34 @@
 #pragma once
 
+#include "engine/world/scarcity_clock.hpp"
+
 #include <cstdint>
 
 namespace mf {
 
-// ---------------------------------------------------------------------------
-// Time is a first-class subsystem.
-// Multiple clocks exist because distributed + physical + replay demand it.
-// ---------------------------------------------------------------------------
+// Simulation tick is process order. Scarcity is Bitcoin height/work.
+// Real is observed_at only — never the World epoch.
 
 enum class TimeDomain : uint8_t {
-    Simulation,   // authoritative simulation clock
-    Real,         // wall-clock / host time
-    Network,      // synchronised network time
-    Sensor,       // physical sensor capture time
-    Replay        // deterministic replay clock
+    Simulation,
+    Real,
+    Scarcity,
+    Network,
+    Sensor,
+    Replay
 };
 
 struct TimeState {
-    // Simulation time (fixed-point friendly later; float for now)
     double simulation_time = 0.0;
-    double delta_time      = 0.0;   // last tick dt (simulation)
-
-    // Real / wall time
+    double delta_time      = 0.0;
     double real_time       = 0.0;
-
-    // Control
-    float  time_scale      = 1.0f;  // 1×, 10×, 0.1×, paused = 0
+    float  time_scale      = 1.0f;
     bool   paused          = false;
-
-    // Determinism helpers
     uint64_t tick_count    = 0;
-    uint32_t fixed_dt_us   = 16667; // ~60 Hz default (microseconds)
+    uint32_t fixed_dt_us   = 16667;
+    ScarcityClock scarcity{};
+
+    void refresh_scarcity() { scarcity = resolve_clock(); }
 
     void advance(double dt_real) {
         real_time += dt_real;
