@@ -1,49 +1,52 @@
-# Foundation — world-state machine
+# Foundation — physical-field substrate
 
-Simulation substrate first. Game engine second. Do not grow plugins until this kernel is law.
+Physical-field substrate first. Simulation is one consumer.
 
-## Authority
-
-```
-observers (renderer / CSI / network)
-        ↓ consume
-     WorldTick
-        ↓
-      WORLD          ← only authority
-        ↓
-  simulation graph
-        ↓
-     substrate       Field → Chunk → Cell → Channels
-        ↓
-      deltas
-        ↓
-   journal / replay
-```
-
-`FieldDelta` is the primitive state-transition language. `WorldEvent` is the matching input language.
-
-## Five invariants
-
-I. **One authority.** `WorldState` is authoritative. No renderer-owned world. No CSI-owned world.
-
-II. **No hidden mutation.** Systems observe a snapshot, emit deltas, the scheduler commits.
-
-III. **Everything consequential is history.** event → delta → tick is representable.
-
-IV. **Time is injectable.** No subsystem secretly calls wall-clock for epoch. Bitcoin is one `ExternalClockAnchor`, not the kernel clock.
-
-V. **Determinism is testable.** Same state + same inputs + same clock + same rules → same `WorldTick` and same `state_hash`.
-
-## Kernel loop
+A cell is an address. It is not an object. Stone, dirt, water, wood, block, item
+are interpretations. The kernel does not know them.
 
 ```
-World world = World::create();
-world.push_event(...);
-WorldTick tick = world.step(dt);
-assert(tick.sequence == 1);
-auto hash = world.state_hash();
-World restored = replay(world.history());
-assert(restored.state_hash() == hash);
+physical environment
+        ↓
+     sensors
+        ↓
+    Observation  (quantity, value, unit, uncertainty, provenance, when, optional where)
+        ↓
+      WORLD
+        ↓
+     Field state
+        ├── inference (derived)
+        ├── simulation (synthetic model)
+        └── actuators / display / archive
 ```
+
+## Source classes
+
+- **physical** — instrument, sensor, external observation
+- **derived** — computed from physical observations
+- **synthetic** — explicitly simulated; rejected by World unless `METAFIELD_ALLOW_SYNTHETIC=1`
+
+Unlabeled values are treated as synthetic.
+
+## Kernel vocabulary
+
+Domain · Coordinate · Quantity · Sample · Field · Observation · Event · Provenance · Time · History
+
+Chunk / Cell / voxel / mesh / ECS / HUD are discretizations or frontends.
+
+`Channel::Matter` stores mass density. It is not a material id.
+
+## Every admitted value answers
+
+WHAT? WHERE? WHEN? FROM WHAT? MEASURED OR DERIVED? BY WHOM? WITH WHAT UNCERTAINTY?
+
+## Invariants
+
+I. WorldState is the only authority.
+II. Systems emit deltas. No hidden mutation.
+III. Events, observations, deltas, ticks are history.
+IV. Time is injectable. Bitcoin is one ExternalClockAnchor.
+V. Same state + inputs + clock + rules → same hash.
+VI. Synthetic cannot silently become measured.
 
 See `engine/kernel/` and `tests/world_kernel.cpp`.

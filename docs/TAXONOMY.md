@@ -1,55 +1,37 @@
 # MetaField implementation taxonomy
 
-Simulation substrate first. Game engine second.
-Minecraft-style voxels are one frontend on this graph.
+Physical-field substrate first. Simulation is one consumer.
+A voxel grid is one discretization of Field(domain, quantity, t).
 
 ```
 META_FIELD
-├── 00. KERNEL              [partial: clock lives in World::Time]
-├── 01. SPATIAL SUBSTRATE   [now: CellCoord, ChunkCoord, VoxelField]
-├── 02. CELL MODEL          [now: Channel + CellState]
-├── 03. FIELD DYNAMICS      [now: DiffusionSystem]
-├── 04. MATERIAL SYSTEM     planned
-├── 05. ENERGY SYSTEM       planned
-├── 06. INFORMATION FIELD   channel reserved
-├── 07. PHYSICS             planned
-├── 08. SIMULATION GRAPH    [now: FieldScheduler]
-├── 09. ECS                 [v0 EntityRegistry]
-├── 10. PROCEDURAL GEN      planned
-├── 11. WORLD PERSISTENCE   planned (consume FieldDelta)
-├── 12. OBSERVER MODEL      CSI / HUD is an observer
-├── 13. RENDERING           HUD visualizes; voxel meshing later
-├── 14. COMPUTE             planned
-├── 15. AGENT SYSTEM        planned
-├── 16. NETWORK FABRIC      Aurora later (consume FieldDelta)
-├── 17. TOOLING             hello_field slice printer
-└── 18. META-LAYER          planned (RuleSet as data)
+├── 00. KERNEL              World / Event / Tick / History / Clock / Provenance
+├── 01. DOMAIN               coordinate systems (grid is one)
+├── 02. QUANTITY             measurable scalars/vectors + units
+├── 03. SAMPLE / OBSERVATION provenance required
+├── 04. FIELD                quantity over a domain
+├── 05. DISCRETIZATION       Chunk / Cell storage (optional)
+├── 06. TRANSFORMATION       systems emit FieldDelta
+├── 07. SIMULATION GRAPH     one consumer of field state
+├── 08. ECS                  frontend participants, not competitors
+├── 09. OBSERVER MODEL       CSI / HUD consume ticks
+├── 10. HARDWARE TOPOLOGY    sensors define their own graph
+├── 11. PERSISTENCE          consume history
+├── 12. RENDERING            frontend
+├── 13. NETWORK FABRIC       Aurora later
+└── 14. META-LAYER           RuleSet as data
 ```
 
-## Fundamental abstraction
-
-```
-Field
- └── Chunk
-      └── Cell
-           ├── State
-           ├── Properties
-           └── Channels
-```
-
-Not Block.
+No material catalog. No block types.
 
 ## Causal spine
 
 ```
-simulation
-    ↓
-FieldDelta { cell, channel, old, new }
-    ↓
-┌──────────────├──────────────├──────────────┐
-│ renderer     │ persistence  │ networking   │
-└──────────────┴──────────────┴──────────────┘
+Observation / WorldEvent
+        ↓
+     systems
+        ↓
+    FieldDelta { address, quantity-channel, old, new }
+        ↓
+ renderer / persistence / network / actuators
 ```
-
-`FieldSystem::evaluate(FieldView, FieldDeltaList, dt)` never writes the field
-directly. The scheduler applies the combined delta.
