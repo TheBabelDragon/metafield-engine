@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/core/types.hpp"
+#include "engine/kernel/provenance.hpp"
 #include "engine/substrate/coord.hpp"
 #include "engine/substrate/channel.hpp"
 #include <cstdint>
@@ -14,6 +15,7 @@ struct WorldEvent {
     CellCoord cell{};
     Channel channel = Channel::Energy;
     float value = 0.f;
+    Provenance provenance{};
 };
 enum class EntityOp : uint8_t { Spawn = 0, Destroy, Write };
 struct EntityDelta {
