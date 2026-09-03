@@ -54,6 +54,14 @@ void take_scalar(FieldObservation& o, std::string_view line, const char* key) {
         o.regions.push_back(FieldRegion{key, static_cast<float>(*v), 1.f});
 }
 
+bool is_c3(const std::optional<std::string>& type,
+           const std::optional<std::string>& body_type,
+           const std::string& id) {
+    if (type && (*type == "c3_swarm" || *type == "C3")) return true;
+    if (body_type && (*body_type == "c3_swarm" || *body_type == "C3")) return true;
+    return id.rfind("c3-", 0) == 0 || id.rfind("C3-", 0) == 0 || id.rfind("C3", 0) == 0;
+}
+
 } // namespace
 
 FieldObservation parse_csi_line(std::string_view line) {
@@ -66,7 +74,8 @@ FieldObservation parse_csi_line(std::string_view line) {
     auto node = json_lite::get_string(line, "node");
     auto body = json_lite::get_string(line, "body_id");
     auto body_type = json_lite::get_string(line, "body_type");
-    const bool c3 = (type && *type == "c3_swarm") || (body_type && *body_type == "c3_swarm");
+    const std::string id_guess = body ? *body : (node ? *node : "");
+    const bool c3 = is_c3(type, body_type, id_guess);
 
     const bool looks_wifi =
         (type && *type == "wifi_csi") ||
@@ -76,8 +85,8 @@ FieldObservation parse_csi_line(std::string_view line) {
 
     if (!looks_wifi && !c3 && !node && !body) return o;
 
-    o.body_id = body ? *body : (node ? *node : (c3 ? "c3-unknown" : "csi-unknown"));
-    o.body_type = body_type ? *body_type : (c3 ? "c3_swarm" : "wifi_csi");
+    o.body_id = id_guess.empty() ? (c3 ? "c3-unknown" : "csi-unknown") : id_guess;
+    o.body_type = c3 ? "C3" : (body_type ? *body_type : "wifi_csi");
     if (auto ts = json_lite::get_string(line, "timestamp")) {
         o.timestamp = *ts;
     } else if (auto tn = json_lite::get_number(line, "timestamp")) {
