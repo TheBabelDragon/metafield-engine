@@ -1,0 +1,36 @@
+produces:
+  - repo: throne-room
+    artifact: FieldTick
+  - repo: field-os
+    artifact: FieldView
+consumes:
+  - repo: optical-body-s3
+    artifact: FieldObservation
+  - repo: signal-processor
+    artifact: SignalProducerPacket
+  - repo: c3-field-swarm
+    artifact: C3JSON
+  - repo: c3-field-swarm
+    artifact: FieldDelta
+  - repo: wifi-sensing-system
+    artifact: FieldObservation
+  - repo: field-os
+    artifact: Observation
+compatible_with:
+  - field-os
+  - c3-field-swarm
+  - optical-body-s3
+  - signal-processor
+  - wifi-sensing-system
+  - throne-room
+observes:
+  - optical-body-s3
+  - c3-field-swarm
+  - wifi-sensing-system
+controls: []
+extends:
+  - field-os
+depends_on:
+  - field-os
+  - babel-interface
+isolates: []
