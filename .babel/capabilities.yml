@@ -1,0 +1,66 @@
+capabilities:
+  - name: admit-observation
+    description: World admits an Observation with provenance. Unlabeled values are synthetic.
+    inputs:
+      - name: FieldObservation
+        schema: field-observation.schema.json
+    outputs:
+      - name: WorldEvent
+    operation: ingest
+    side_effects:
+      - appends to world history
+      - rejects unlabeled synthetic unless METAFIELD_ALLOW_SYNTHETIC=1
+    requires:
+      - engine/kernel
+    produces:
+      - WorldEvent
+    safe: false
+    entry: engine/ingest/observation.hpp
+  - name: field-view
+    description: Frozen read of VoxelField. Systems never write through FieldView.
+    inputs: []
+    outputs:
+      - name: FieldView
+        schema: field-view.schema.json
+    operation: read
+    side_effects: []
+    requires:
+      - VoxelField
+    produces:
+      - FieldView
+    safe: true
+    entry: engine/substrate/field.hpp FieldView
+  - name: apply-field-delta
+    description: Apply a FieldDeltaList onto the voxel field.
+    inputs:
+      - name: FieldDeltaList
+        schema: field-delta.schema.json
+    outputs:
+      - name: VoxelField
+    operation: mutate
+    side_effects:
+      - writes cell channel values
+    requires:
+      - FieldDelta
+    produces:
+      - FieldState
+    safe: false
+    entry: VoxelField::apply
+  - name: field-tick
+    description: One atomic application of a sorted FieldDeltaList.
+    inputs:
+      - name: FieldDeltaList
+    outputs:
+      - name: FieldTick
+        schema: field-tick.schema.json
+    operation: compute
+    side_effects:
+      - advances world clock
+      - records history
+    requires:
+      - WorldState authority
+    produces:
+      - FieldTick
+      - state_hash
+    safe: false
+    entry: engine/kernel/world_tick.hpp

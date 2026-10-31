@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FieldTick",
+  "description": "Aligned with field-os/schema/field_tick.schema.json.",
+  "type": "object",
+  "required": ["epoch", "sequence", "deltas"],
+  "properties": {
+    "epoch": { "type": "integer" },
+    "sequence": { "type": "integer" },
+    "dt": { "type": "number" },
+    "state_hash": { "type": "string" },
+    "deltas": { "type": "array" }
+  }
+}

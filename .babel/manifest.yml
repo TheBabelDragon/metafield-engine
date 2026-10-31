@@ -1,0 +1,64 @@
+babel: "0.1"
+identity:
+  name: metafield-engine
+  owner: TheBabelDragon
+  repo: TheBabelDragon/metafield-engine
+  url: https://github.com/TheBabelDragon/metafield-engine
+  kind: substrate-engine
+  version: "0.1.0"
+purpose: >
+  Physical-field substrate engine. World admits Observations. A cell is an
+  address. Field → Chunk → Cell → Channels. FieldView is a frozen read.
+  Systems emit FieldDelta. FieldTick applies a sorted delta list.
+  Simulation is one consumer. Hardware is required. This contract does not
+  become a second kernel.
+status: operational
+entrypoints:
+  - kind: kernel
+    path: engine/kernel/
+  - kind: substrate
+    path: engine/substrate/field.hpp
+  - kind: ingest
+    path: engine/ingest/observation.hpp
+  - kind: hud
+    path: engine/renderer/hud_page.html
+    url: http://127.0.0.1:8765
+  - kind: test
+    command: world_kernel_test
+runtime:
+  language: C++
+  build: cmake
+  requires:
+    - physical observation source (wifi-sensing-system / optical-body-s3 / c3-field-swarm)
+  rejects:
+    - unlabeled synthetic values unless METAFIELD_ALLOW_SYNTHETIC=1
+inputs:
+  - name: FieldObservation
+    schema: field-observation.schema.json
+  - name: FieldDelta
+    schema: field-delta.schema.json
+  - name: C3JSON
+    source: c3-field-swarm
+outputs:
+  - name: FieldTick
+    schema: field-tick.schema.json
+  - name: FieldView
+    schema: field-view.schema.json
+  - name: WorldState
+    schema: world-state.schema.json
+capabilities:
+  - admit-observation
+  - field-view
+  - apply-field-delta
+  - field-tick
+operations:
+  safe:
+    - field-view
+    - inspect-hud
+  mutation:
+    - admit-observation
+    - apply-field-delta
+    - field-tick
+notes: >
+  Vocabulary aligned with field-os and docs/FOUNDATION.md.
+  Chunk / Cell / voxel / HUD are discretizations, not object types.
